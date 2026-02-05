@@ -1,60 +1,63 @@
 import { useEffect, useMemo, useRef } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 import { Protocol } from "pmtiles";
-import type { ScoredRegion } from "../api/client";
+import type { PricePaidPoint, SectorStat } from "../api/client";
 
 type Props = {
-  regions: ScoredRegion[];
-  onSelect: (id: string) => void;
-  selectedId: string | null;
+  pricePaidPoints: PricePaidPoint[];
+  sectors: SectorStat[];
+  onViewportChange?: (bbox: number[], zoom: number) => void;
+  focusPoint?: { latitude: number; longitude: number } | null;
 };
 
 const MAP_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || "/tiles/style.json";
 
-function toGeoJson(regions: ScoredRegion[]) {
-  return {
-    type: "FeatureCollection",
-    features: regions.map((item) => ({
-      type: "Feature",
-      id: item.region.id,
-      properties: {
-        id: item.region.id,
-        name: item.region.name,
-        feasible: item.feasible,
-      },
-      geometry: {
-        type: "Polygon",
-        coordinates: [item.region.polygon.map(([lat, lng]) => [lng, lat])],
-      },
-    })),
-  } as GeoJSON.FeatureCollection;
-}
-
-function toPointGeoJson(regions: ScoredRegion[]) {
-  return {
-    type: "FeatureCollection",
-    features: regions.map((item) => ({
-      type: "Feature",
-      id: `${item.region.id}-pt`,
-      properties: {
-        id: item.region.id,
-        name: item.region.name,
-        feasible: item.feasible,
-      },
-      geometry: {
-        type: "Point",
-        coordinates: [item.region.center[1], item.region.center[0]],
-      },
-    })),
-  } as GeoJSON.FeatureCollection;
-}
-
-export default function MapView({ regions, onSelect, selectedId }: Props) {
+export default function MapView({
+  pricePaidPoints,
+  sectors,
+  onViewportChange,
+  focusPoint,
+}: Props) {
   const mapRef = useRef<Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const polygons = useMemo(() => toGeoJson(regions), [regions]);
-  const points = useMemo(() => toPointGeoJson(regions), [regions]);
+  const pricePoints = useMemo(
+    () => ({
+      type: "FeatureCollection",
+      features: pricePaidPoints.map((point) => ({
+        type: "Feature",
+        id: point.transaction_id,
+        properties: {
+          price: point.price,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [point.longitude, point.latitude],
+        },
+      })),
+    }),
+    [pricePaidPoints]
+  );
+  const sectorPoints = useMemo(
+    () => ({
+      type: "FeatureCollection",
+      features: sectors.map((sector) => ({
+        type: "Feature",
+        id: sector.sector,
+        properties: {
+          sector: sector.sector,
+          score: sector.score ?? 0,
+          median_price: sector.median_price,
+          transactions: sector.transactions,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [sector.longitude, sector.latitude],
+        },
+      })),
+    }),
+    [sectors]
+  );
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -72,103 +75,115 @@ export default function MapView({ regions, onSelect, selectedId }: Props) {
     mapRef.current = map;
 
     map.on("load", () => {
-      map.addSource("regions", {
+      map.addSource("price-paid", {
         type: "geojson",
-        data: polygons,
+        data: pricePoints,
       });
-      map.addSource("region-points", {
+      map.addSource("sectors", {
         type: "geojson",
-        data: points,
+        data: sectorPoints,
       });
 
       map.addLayer({
-        id: "region-fill",
-        type: "fill",
-        source: "regions",
+        id: "price-paid-heat",
+        type: "heatmap",
+        source: "price-paid",
         paint: {
-          "fill-color": [
-            "case",
-            ["boolean", ["get", "feasible"], false],
-            "#10b981",
-            "#0f172a",
-          ],
-          "fill-opacity": [
-            "case",
-            ["boolean", ["get", "feasible"], false],
-            0.35,
+          "heatmap-intensity": 0.8,
+          "heatmap-radius": 18,
+          "heatmap-opacity": 0.6,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "rgba(15,23,42,0)",
             0.2,
+            "#38bdf8",
+            0.4,
+            "#22c55e",
+            0.6,
+            "#facc15",
+            0.8,
+            "#fb7185",
           ],
         },
       });
 
       map.addLayer({
-        id: "region-outline",
-        type: "line",
-        source: "regions",
-        paint: {
-          "line-color": [
-            "case",
-            ["boolean", ["get", "feasible"], false],
-            "#34d399",
-            "#475569",
-          ],
-          "line-width": 2,
-        },
-      });
-
-      map.addLayer({
-        id: "region-points",
+        id: "sector-points",
         type: "circle",
-        source: "region-points",
+        source: "sectors",
         paint: {
           "circle-radius": [
-            "case",
-            ["boolean", ["get", "feasible"], false],
-            7,
-            5,
+            "interpolate",
+            ["linear"],
+            ["get", "transactions"],
+            1,
+            4,
+            50,
+            10,
+            200,
+            16,
           ],
           "circle-color": [
-            "case",
-            ["boolean", ["get", "feasible"], false],
-            "#22c55e",
-            "#94a3b8",
+            "interpolate",
+            ["linear"],
+            ["get", "score"],
+            0,
+            "#64748b",
+            0.5,
+            "#38bdf8",
+            1,
+            "#facc15",
           ],
-          "circle-opacity": 0.9,
+          "circle-opacity": 0.75,
+          "circle-stroke-color": "#0f172a",
+          "circle-stroke-width": 1,
         },
       });
 
-      map.addLayer({
-        id: "region-selected",
-        type: "line",
-        source: "regions",
-        paint: {
-          "line-color": "#facc15",
-          "line-width": 3,
-        },
-        filter: ["==", ["get", "id"], selectedId ?? ""],
-      });
+      const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
 
-      map.on("click", "region-fill", (event) => {
+      map.on("mousemove", "sector-points", (event) => {
         const feature = event.features?.[0];
-        const id = feature?.properties?.id;
-        if (typeof id === "string") {
-          onSelect(id);
-        }
+        if (!feature || !event.lngLat) return;
+        const props = feature.properties || {};
+        const sector = props.sector || "Sector";
+        const median = Number(props.median_price || 0);
+        const transactions = Number(props.transactions || 0);
+        const html = `
+          <div style="font-size:12px">
+            <div style="font-weight:600">${sector}</div>
+            <div>Median price: £${median.toLocaleString()}</div>
+            <div>Sales: ${transactions}</div>
+          </div>
+        `;
+        popup.setLngLat(event.lngLat).setHTML(html).addTo(map);
       });
 
-      map.on("click", "region-points", (event) => {
-        const feature = event.features?.[0];
-        const id = feature?.properties?.id;
-        if (typeof id === "string") {
-          onSelect(id);
-        }
+      map.on("mouseleave", "sector-points", () => {
+        popup.remove();
       });
 
-      map.on("mouseenter", "region-fill", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "region-fill", () => {
-        map.getCanvas().style.cursor = "";
+      if (onViewportChange) {
+        const bounds = map.getBounds();
+        onViewportChange(
+          [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
+          map.getZoom()
+        );
+      }
+
+      map.on("moveend", () => {
+        if (!onViewportChange) return;
+        const bounds = map.getBounds();
+        const bbox = [
+          bounds.getWest(),
+          bounds.getSouth(),
+          bounds.getEast(),
+          bounds.getNorth(),
+        ];
+        onViewportChange(bbox, map.getZoom());
       });
     });
 
@@ -177,22 +192,26 @@ export default function MapView({ regions, onSelect, selectedId }: Props) {
       maplibregl.removeProtocol("pmtiles");
       mapRef.current = null;
     };
-  }, [onSelect, polygons, points, selectedId]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.getSource("regions")) return;
+    if (!map || !map.getSource("price-paid")) return;
+    const priceSource = map.getSource("price-paid") as maplibregl.GeoJSONSource;
+    priceSource.setData(pricePoints);
+    const sectorSource = map.getSource("sectors") as maplibregl.GeoJSONSource;
+    sectorSource.setData(sectorPoints);
+  }, [pricePoints, sectorPoints]);
 
-    const source = map.getSource("regions") as maplibregl.GeoJSONSource;
-    source.setData(polygons);
-
-    const pointSource = map.getSource("region-points") as maplibregl.GeoJSONSource;
-    pointSource.setData(points);
-
-    if (map.getLayer("region-selected")) {
-      map.setFilter("region-selected", ["==", ["get", "id"], selectedId ?? ""]);
-    }
-  }, [polygons, points, selectedId]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !focusPoint) return;
+    map.flyTo({
+      center: [focusPoint.longitude, focusPoint.latitude],
+      zoom: Math.max(map.getZoom(), 12),
+      speed: 1.2,
+    });
+  }, [focusPoint]);
 
   return <div ref={containerRef} className="h-full min-h-[520px] w-full" />;
 }
