@@ -91,6 +91,31 @@ export function fetchSectors(limit = 2000) {
   return json<{ rows: SectorStat[] }>(`/api/sectors?${params.toString()}`);
 }
 
+export function fetchSectorRankings(payload: {
+  scope: "viewport" | "nationwide";
+  bbox?: number[];
+  affordability: {
+    monthlyBudget: number;
+    deposit: number;
+    mortgageRate: number;
+    termYears: number;
+  };
+  filters: {
+    maxPrice: number;
+    maxCommute: number;
+    minSchools: number;
+    maxCrime: number;
+  };
+  priorities: string[];
+  limit?: number;
+}) {
+  return json<{ rows: SectorStat[] }>(`/api/sector-rankings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchPostcodeLocation(postcode: string) {
   const params = new URLSearchParams({ postcode });
   return json<{ location: { postcode: string; latitude: number; longitude: number } }>(

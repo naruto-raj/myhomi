@@ -55,3 +55,5 @@ CORS_ORIGIN=http://localhost:5173
   - `node scripts/compute-sector-stats.js`
 - Nationwide sectors API:
   - `GET /api/sectors?limit=2000`
+- If you already have `sector_stats`, add `updated_at` once:
+  - `psql "$DATABASE_URL" -c "ALTER TABLE sector_stats ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();"`

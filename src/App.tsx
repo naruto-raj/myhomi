@@ -3,8 +3,7 @@ import {
   fetchPostcodeLocation,
   fetchPricePaidByPostcode,
   fetchPricePaidViewport,
-  fetchSectors,
-  fetchSectorsViewport,
+  fetchSectorRankings,
   PricePaidPoint,
   SectorStat,
 } from "./api/client";
@@ -22,7 +21,7 @@ export default function App() {
   const [postcodeResults, setPostcodeResults] = useState<PricePaidPoint[]>([]);
   const [priorityOrder, setPriorityOrder] = useState(["price", "commute", "schools", "crime"]);
   const [filters, setFilters] = useState({
-    maxPrice: 800000,
+    maxPrice: 5_000_000,
     maxCommute: 60,
     minSchools: 60,
     maxCrime: 60,
@@ -34,6 +33,7 @@ export default function App() {
     termYears: 30,
   });
   const viewportTimer = useRef<number | null>(null);
+  const lastBboxRef = useRef<number[] | null>(null);
   const [scope, setScope] = useState<"viewport" | "nationwide">("viewport");
   const priorityOptions = [
     { value: "price", label: "Price Paid (higher better)" },
@@ -49,16 +49,24 @@ export default function App() {
 
   const handleViewportChange = (bbox: number[], zoom: number) => {
     setCurrentZoom(zoom);
+    lastBboxRef.current = bbox;
     if (viewportTimer.current) {
       window.clearTimeout(viewportTimer.current);
     }
     viewportTimer.current = window.setTimeout(() => {
       setViewportLoading(true);
-      const sectorPromise = scope === "nationwide" ? fetchSectors(2000) : fetchSectorsViewport(bbox, 500);
-      Promise.all([fetchPricePaidViewport(bbox, 2000), sectorPromise])
-        .then(([priceData, sectorData]) => {
+      const rankingsPayload = {
+        scope,
+        bbox,
+        affordability,
+        filters,
+        priorities: priorityOrder,
+        limit: 50,
+      };
+      Promise.all([fetchPricePaidViewport(bbox, 2000), fetchSectorRankings(rankingsPayload)])
+        .then(([priceData, rankedData]) => {
           setPricePaidPoints(priceData.rows);
-          setSectors(sectorData.rows);
+          setSectors(rankedData.rows);
         })
         .catch(() => {
           setPricePaidPoints([]);
@@ -68,58 +76,36 @@ export default function App() {
     }, 350);
   };
 
-  const scoredSectors = useMemo(() => {
-    if (sectors.length === 0) return [];
-    const prices = sectors.map((s) => s.median_price);
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const rangePrice = Math.max(maxPrice - minPrice, 1);
-
-    const weightMap: Record<string, number> = {};
-    priorityOrder.forEach((key, idx) => {
-      weightMap[key] = 4 - idx;
-    });
-
-    const maxAffordable = (() => {
-      const monthlyRate = affordability.mortgageRate / 100 / 12;
-      const n = affordability.termYears * 12;
-      if (n <= 0) return affordability.deposit;
-      const loan =
-        monthlyRate === 0
-          ? affordability.monthlyBudget * n
-          : (affordability.monthlyBudget * (Math.pow(1 + monthlyRate, n) - 1)) /
-            (monthlyRate * Math.pow(1 + monthlyRate, n));
-      return Math.max(loan, 0) + affordability.deposit;
-    })();
-
-    return sectors
-      .map((sector) => {
-        const priceScore = (sector.median_price - minPrice) / rangePrice;
-        const commuteScore = 0.5;
-        const schoolsScore = 0.5;
-        const crimeScore = 0.5;
-        const score =
-          priceScore * (weightMap.price || 0) +
-          commuteScore * (weightMap.commute || 0) +
-          schoolsScore * (weightMap.schools || 0) +
-          (1 - crimeScore) * (weightMap.crime || 0);
-
-        return { ...sector, score };
-      })
-      .filter((sector) => sector.median_price <= filters.maxPrice)
-      .filter((sector) => sector.median_price <= maxAffordable)
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      .slice(0, 20);
-  }, [sectors, priorityOrder, filters, affordability]);
-
   useEffect(() => {
-    if (scope !== "nationwide") return;
-    setViewportLoading(true);
-    fetchSectors(2000)
-      .then((data) => setSectors(data.rows))
-      .catch(() => setSectors([]))
-      .finally(() => setViewportLoading(false));
-  }, [scope]);
+    if (!lastBboxRef.current) return;
+    if (viewportTimer.current) window.clearTimeout(viewportTimer.current);
+    viewportTimer.current = window.setTimeout(() => {
+      setViewportLoading(true);
+      const rankingsPayload = {
+        scope,
+        bbox: lastBboxRef.current,
+        affordability,
+        filters,
+        priorities: priorityOrder,
+        limit: 50,
+      };
+      Promise.all([
+        fetchPricePaidViewport(lastBboxRef.current, 2000),
+        fetchSectorRankings(rankingsPayload),
+      ])
+        .then(([priceData, rankedData]) => {
+          setPricePaidPoints(priceData.rows);
+          setSectors(rankedData.rows);
+        })
+        .catch(() => {
+          setPricePaidPoints([]);
+          setSectors([]);
+        })
+        .finally(() => setViewportLoading(false));
+    }, 350);
+  }, [scope, affordability, filters, priorityOrder]);
+
+  const scoredSectors = useMemo(() => sectors, [sectors]);
 
   const handlePostcodeSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -322,45 +308,43 @@ export default function App() {
               <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Filters</p>
               <div className="mt-3 space-y-3">
                 <div>
-                  <label className="text-xs text-stone-600">Max Median Price (£)</label>
+                  <label className="text-xs text-stone-600">
+                    Max Commute (mins): <span className="font-semibold">{filters.maxCommute}</span>
+                  </label>
                   <input
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
-                    type="number"
-                    min={50000}
-                    step={10000}
-                    value={filters.maxPrice}
-                    onChange={(e) => setFilters({ ...filters, maxPrice: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-stone-600">Max Commute (mins)</label>
-                  <input
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
-                    type="number"
+                    className="mt-2 w-full"
+                    type="range"
                     min={10}
                     max={180}
+                    step={5}
                     value={filters.maxCommute}
                     onChange={(e) => setFilters({ ...filters, maxCommute: Number(e.target.value) })}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-stone-600">Min Schools Score</label>
+                  <label className="text-xs text-stone-600">
+                    Min Schools Score: <span className="font-semibold">{filters.minSchools}</span>
+                  </label>
                   <input
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
-                    type="number"
+                    className="mt-2 w-full"
+                    type="range"
                     min={0}
                     max={100}
+                    step={5}
                     value={filters.minSchools}
                     onChange={(e) => setFilters({ ...filters, minSchools: Number(e.target.value) })}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-stone-600">Max Crime Index</label>
+                  <label className="text-xs text-stone-600">
+                    Max Crime Index: <span className="font-semibold">{filters.maxCrime}</span>
+                  </label>
                   <input
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
-                    type="number"
+                    className="mt-2 w-full"
+                    type="range"
                     min={0}
                     max={100}
+                    step={5}
                     value={filters.maxCrime}
                     onChange={(e) => setFilters({ ...filters, maxCrime: Number(e.target.value) })}
                   />

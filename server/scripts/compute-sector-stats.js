@@ -33,7 +33,7 @@ async function compute() {
 
     await client.query(
       `
-        INSERT INTO sector_stats (sector, median_price, avg_price, transactions, latitude, longitude)
+        INSERT INTO sector_stats (sector, median_price, avg_price, transactions, latitude, longitude, updated_at)
         WITH filtered AS (
           SELECT
             pp.price,
@@ -58,7 +58,7 @@ async function compute() {
           WHERE inward IS NOT NULL
           GROUP BY sector
         )
-        SELECT * FROM sectors;
+        SELECT *, now() AS updated_at FROM sectors;
       `
     );
 
