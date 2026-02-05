@@ -1,6 +1,6 @@
-# Housing Map (Phase 1)
+# Housing Map (Price Paid Explorer)
 
-Prototype with a map, user inputs, and mocked feasibility logic + a lightweight backend proxy.
+Prototype with MapLibre + real UK data (Price Paid + ONS Postcode Directory) and sector ranking.
 
 ## Setup
 
@@ -18,8 +18,8 @@ npm run dev
 ```
 
 ## Notes
-- Uses mocked region data served from `server/data/regions.json`.
-- Feasibility is calculated by the backend (`/api/feasible`).
+- Map uses MapLibre with a hosted style URL from `.env`.
+- Sector rankings are computed server-side (`/api/sector-rankings`).
 - Phase 3 notes live in `docs/phase-3.md`.
 - Self-hosted tiles setup in `docs/tiles.md`.
 
@@ -27,13 +27,19 @@ npm run dev
 - The app reads `VITE_MAP_STYLE_URL` from `.env`.
 - Current POC uses MapTiler's hosted style (non-commercial).
 
-## Real Data (Price Paid)
-- Place the Price Paid CSV in `data/price-paid/ppd.csv`.
-- Run the ingest script from `server/`:
-  - `node scripts/ingest-price-paid.js`
-- Query by postcode:
-  - `GET /api/price-paid?postcode=SW1A1AA`
+## Data Downloads
+### Price Paid Data (HM Land Registry)
+Download the full CSV and place it at:
+`data/price-paid/ppd.csv`
 
+Suggested source:
+- `http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/pp-complete.csv`
+
+### ONS Postcode Directory
+Download a CSV that includes `pcd/pcds`, `lat`, and `long` columns and place it at:
+`data/postcode-directory/ons_postcode_directory.csv`
+
+## Environment
 Example `server/.env`:
 ```
 DATABASE_URL=postgres://housing_user:<PASSWORD>@localhost:5432/housing_map
@@ -42,18 +48,51 @@ PORT=5050
 CORS_ORIGIN=http://localhost:5173
 ```
 
-## Real Data (Postcodes + Viewport)
-- Place ONS Postcode Directory CSV in `data/postcode-directory/ons_postcode_directory.csv`.
-- Run the ingest script from `server/`:
-  - `node scripts/ingest-postcodes.js`
-- Viewport API (bbox = minLng,minLat,maxLng,maxLat):
-  - `GET /api/price-paid/viewport?bbox=-0.5,51.2,0.2,51.8`
-- UI loads points/heatmap when zoom >= 10.
+Example root `.env`:
+```
+VITE_MAP_STYLE_URL=...
+```
 
-## Real Data (Sector Stats)
-- Compute sector stats (nationwide):
-  - `node scripts/compute-sector-stats.js`
-- Nationwide sectors API:
-  - `GET /api/sectors?limit=2000`
-- If you already have `sector_stats`, add `updated_at` once:
-  - `psql "$DATABASE_URL" -c "ALTER TABLE sector_stats ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();"`
+## Local Data Pipeline (Recommended Order)
+1) Create tables (if not present):
+```bash
+psql "$DATABASE_URL" -f server/sql/price_paid_schema.sql
+psql "$DATABASE_URL" -f server/sql/postcode_coords_schema.sql
+psql "$DATABASE_URL" -f server/sql/sector_stats.sql
+```
+
+2) Ingest Price Paid (fast mode):
+```bash
+cd server
+PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true node scripts/ingest-price-paid.js
+```
+If the CSV has a header:
+```bash
+PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true PRICE_PAID_HAS_HEADER=true node scripts/ingest-price-paid.js
+```
+
+3) Ingest ONS Postcode Directory:
+```bash
+node scripts/ingest-postcodes.js
+```
+
+4) Compute nationwide sector stats:
+```bash
+node scripts/compute-sector-stats.js
+```
+
+5) Run servers:
+```bash
+cd server
+npm run dev
+```
+```bash
+cd ..
+npm run dev
+```
+
+## Key APIs
+- Postcode lookup: `GET /api/postcode?postcode=SW1A1AA`
+- Price paid by postcode: `GET /api/price-paid?postcode=SW1A1AA`
+- Price paid by viewport: `GET /api/price-paid/viewport?bbox=minLng,minLat,maxLng,maxLat`
+- Sector rankings: `POST /api/sector-rankings`
