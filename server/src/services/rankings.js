@@ -86,6 +86,8 @@ export async function getRankedSectors({
     return Math.max(loan, 0) + affordability.deposit;
   })();
 
+  const maxPriceCap = maxAffordable * 1.05;
+
   return rows
     .map((row) => {
       const priceScore = normalize(Number(row.median_price || 0), minPrice, maxPrice);
@@ -100,8 +102,7 @@ export async function getRankedSectors({
 
       return { ...row, score };
     })
-    .filter((row) => Number(row.median_price || 0) <= filters.maxPrice)
-    .filter((row) => Number(row.median_price || 0) <= maxAffordable)
+    .filter((row) => Number(row.median_price || 0) <= maxPriceCap)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, limit);
 }

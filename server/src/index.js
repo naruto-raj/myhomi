@@ -186,7 +186,6 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       termYears: Number(affordability?.termYears ?? 0),
     };
     const safeFilters = {
-      maxPrice: Number(filters?.maxPrice ?? 1_000_000),
       maxCommute: Number(filters?.maxCommute ?? 120),
       minSchools: Number(filters?.minSchools ?? 0),
       maxCrime: Number(filters?.maxCrime ?? 100),

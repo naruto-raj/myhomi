@@ -48,7 +48,6 @@ export default function App() {
   const [postcodeResults, setPostcodeResults] = useState<PricePaidPoint[]>([]);
   const [priorityOrder, setPriorityOrder] = useState(["price", "commute", "schools", "crime"]);
   const [filters, setFilters] = useState({
-    maxPrice: 5_000_000,
     maxCommute: 60,
     minSchools: 60,
     maxCrime: 60,

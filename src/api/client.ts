@@ -56,7 +56,6 @@ export function fetchSectorRankings(payload: {
     termYears: number;
   };
   filters: {
-    maxPrice: number;
     maxCommute: number;
     minSchools: number;
     maxCrime: number;
