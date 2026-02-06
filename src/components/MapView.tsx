@@ -6,6 +6,9 @@ import type { PricePaidPoint, SectorStat } from "../api/client";
 type Props = {
   pricePaidPoints: PricePaidPoint[];
   sectors: SectorStat[];
+  showHeatmap: boolean;
+  showCentroids: boolean;
+  showBestFit: boolean;
   onViewportChange?: (bbox: number[], zoom: number) => void;
   focusPoint?: { latitude: number; longitude: number } | null;
 };
@@ -15,11 +18,15 @@ const MAP_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || "/tiles/style.json";
 export default function MapView({
   pricePaidPoints,
   sectors,
+  showHeatmap,
+  showCentroids,
+  showBestFit,
   onViewportChange,
   focusPoint,
 }: Props) {
   const mapRef = useRef<Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const showCentroidsRef = useRef(showCentroids);
 
   const pricePoints = useMemo(
     () => ({
@@ -60,6 +67,10 @@ export default function MapView({
   );
 
   useEffect(() => {
+    showCentroidsRef.current = showCentroids;
+  }, [showCentroids]);
+
+  useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     const protocol = new Protocol();
@@ -88,6 +99,9 @@ export default function MapView({
         id: "price-paid-heat",
         type: "heatmap",
         source: "price-paid",
+        layout: {
+          visibility: showHeatmap ? "visible" : "none",
+        },
         paint: {
           "heatmap-intensity": 0.8,
           "heatmap-radius": 18,
@@ -111,9 +125,40 @@ export default function MapView({
       });
 
       map.addLayer({
+        id: "best-fit-heat",
+        type: "heatmap",
+        source: "sectors",
+        layout: {
+          visibility: showBestFit ? "visible" : "none",
+        },
+        paint: {
+          "heatmap-weight": ["interpolate", ["linear"], ["get", "score"], 0, 0, 1, 1],
+          "heatmap-intensity": 1.1,
+          "heatmap-radius": 24,
+          "heatmap-opacity": 0.7,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "rgba(15,23,42,0)",
+            0.3,
+            "#60a5fa",
+            0.6,
+            "#34d399",
+            0.8,
+            "#fbbf24",
+          ],
+        },
+      });
+
+      map.addLayer({
         id: "sector-points",
         type: "circle",
         source: "sectors",
+        layout: {
+          visibility: showCentroids ? "visible" : "none",
+        },
         paint: {
           "circle-radius": [
             "interpolate",
@@ -146,6 +191,7 @@ export default function MapView({
       const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
 
       map.on("mousemove", "sector-points", (event) => {
+        if (!showCentroidsRef.current) return;
         const feature = event.features?.[0];
         if (!feature || !event.lngLat) return;
         const props = feature.properties || {};
@@ -202,6 +248,20 @@ export default function MapView({
     const sectorSource = map.getSource("sectors") as maplibregl.GeoJSONSource;
     sectorSource.setData(sectorPoints);
   }, [pricePoints, sectorPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (map.getLayer("price-paid-heat")) {
+      map.setLayoutProperty("price-paid-heat", "visibility", showHeatmap ? "visible" : "none");
+    }
+    if (map.getLayer("sector-points")) {
+      map.setLayoutProperty("sector-points", "visibility", showCentroids ? "visible" : "none");
+    }
+    if (map.getLayer("best-fit-heat")) {
+      map.setLayoutProperty("best-fit-heat", "visibility", showBestFit ? "visible" : "none");
+    }
+  }, [showHeatmap, showCentroids, showBestFit]);
 
   useEffect(() => {
     const map = mapRef.current;
