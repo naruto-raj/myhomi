@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgis/postgis:15-3.4
+    container_name: housing-map-db
+    shm_size: "1g"
+    environment:
+      POSTGRES_DB: housing_map
+      POSTGRES_USER: housing_user
+      POSTGRES_PASSWORD: housing_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U housing_user -d housing_map"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: housing-map-server
+    environment:
+      PORT: 5050
+      CORS_ORIGIN: http://localhost:5173
+      DATABASE_URL: postgres://housing_user:housing_pass@db:5432/housing_map
+      DATA_DIR: /data
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./server:/app
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: housing-map-web
+    environment:
+      VITE_MAP_STYLE_URL: ${VITE_MAP_STYLE_URL}
+      VITE_API_PROXY_URL: http://server:5050
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - server
+
+volumes:
+  pgdata:

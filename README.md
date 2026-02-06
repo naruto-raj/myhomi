@@ -17,6 +17,28 @@ cd ..
 npm run dev
 ```
 
+## Docker (Hot Reload)
+```bash
+docker compose up --build
+```
+
+### Container URLs
+- Web: http://localhost:5173
+- API: http://localhost:5050
+- Postgres: localhost:5432 (user: housing_user, db: housing_map)
+
+### Docker Data Ingest (inside compose)
+```bash
+# Price Paid (fast mode)
+docker compose run --rm server sh -lc \"PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true node scripts/ingest-price-paid.js\"
+
+# ONS Postcode Directory
+docker compose run --rm server sh -lc \"node scripts/ingest-postcodes.js\"
+
+# Compute sector stats
+docker compose run --rm server sh -lc \"node scripts/compute-sector-stats.js\"
+```
+
 ## Notes
 - Map uses MapLibre with a hosted style URL from `.env`.
 - Sector rankings are computed server-side (`/api/sector-rankings`).
