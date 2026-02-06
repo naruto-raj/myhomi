@@ -1,30 +1,3 @@
-export type Region = {
-  id: string;
-  name: string;
-  center: [number, number];
-  polygon: [number, number][];
-  avgPrice: number;
-  commuteMins: number;
-  crimeIndex: number;
-  schoolsScore: number;
-  employmentScore: number;
-};
-
-export type Inputs = {
-  maxMonthlyBudget: number;
-  deposit: number;
-  mortgageRate: number;
-  termYears: number;
-  maxCommuteMins: number;
-  maxCrimeIndex: number;
-};
-
-export type ScoredRegion = {
-  region: Region;
-  feasible: boolean;
-  payment: number;
-};
-
 export type PricePaidPoint = {
   transaction_id: string;
   price: number;
@@ -53,23 +26,6 @@ async function json<T>(input: RequestInfo, init?: RequestInit) {
   return res.json() as Promise<T>;
 }
 
-export function fetchFeasible(inputs: Inputs) {
-  return json<{ scored: ScoredRegion[] }>("/api/feasible", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(inputs),
-  });
-}
-
-export function searchRegions(query: string) {
-  const params = new URLSearchParams({ q: query });
-  return json<{ results: Region[] }>(`/api/search?${params.toString()}`);
-}
-
-export function fetchRegion(id: string) {
-  return json<Region>(`/api/region/${encodeURIComponent(id)}`);
-}
-
 export function fetchPricePaidViewport(bbox: number[], limit = 2000) {
   const params = new URLSearchParams({
     bbox: bbox.join(","),
@@ -78,17 +34,16 @@ export function fetchPricePaidViewport(bbox: number[], limit = 2000) {
   return json<{ rows: PricePaidPoint[] }>(`/api/price-paid/viewport?${params.toString()}`);
 }
 
-export function fetchSectorsViewport(bbox: number[], limit = 500) {
-  const params = new URLSearchParams({
-    bbox: bbox.join(","),
-    limit: String(limit),
-  });
-  return json<{ rows: SectorStat[] }>(`/api/sectors/viewport?${params.toString()}`);
+export function fetchPostcodeLocation(postcode: string) {
+  const params = new URLSearchParams({ postcode });
+  return json<{ location: { postcode: string; latitude: number; longitude: number } }>(
+    `/api/postcode?${params.toString()}`
+  );
 }
 
-export function fetchSectors(limit = 2000) {
-  const params = new URLSearchParams({ limit: String(limit) });
-  return json<{ rows: SectorStat[] }>(`/api/sectors?${params.toString()}`);
+export function fetchPricePaidByPostcode(postcode: string, limit = 50) {
+  const params = new URLSearchParams({ postcode, limit: String(limit) });
+  return json<{ rows: PricePaidPoint[] }>(`/api/price-paid?${params.toString()}`);
 }
 
 export function fetchSectorRankings(payload: {
@@ -114,16 +69,4 @@ export function fetchSectorRankings(payload: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-}
-
-export function fetchPostcodeLocation(postcode: string) {
-  const params = new URLSearchParams({ postcode });
-  return json<{ location: { postcode: string; latitude: number; longitude: number } }>(
-    `/api/postcode?${params.toString()}`
-  );
-}
-
-export function fetchPricePaidByPostcode(postcode: string, limit = 50) {
-  const params = new URLSearchParams({ postcode, limit: String(limit) });
-  return json<{ rows: PricePaidPoint[] }>(`/api/price-paid?${params.toString()}`);
 }

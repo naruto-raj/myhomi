@@ -1,10 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { scoreRegions } from "./services/scoring.js";
 import { getPricePaidByPostcode } from "./services/pricePaid.js";
 import { getPricePaidInViewport } from "./services/pricePaidViewport.js";
 import { getPostcodeLocation } from "./services/postcodes.js";
@@ -18,14 +15,9 @@ const app = express();
 const port = Number(process.env.PORT || 5050);
 const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const regionsPath = path.join(__dirname, "..", "data", "regions.json");
-const regions = JSON.parse(fs.readFileSync(regionsPath, "utf-8"));
-
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "1mb" }));
-app.use("/tiles", express.static(path.join(__dirname, "..", "tiles")));
+app.use("/tiles", express.static(path.join(process.cwd(), "tiles")));
 
 const cache = new Map();
 const rateLimits = new Map();
@@ -64,51 +56,6 @@ function rateLimit(req, res, next) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
-});
-
-app.get("/api/regions", (_req, res) => {
-  res.json(regions);
-});
-
-app.post("/api/feasible", (req, res) => {
-  const {
-    maxMonthlyBudget,
-    deposit,
-    mortgageRate,
-    termYears,
-    maxCommuteMins,
-    maxCrimeIndex,
-  } = req.body || {};
-
-  const inputs = {
-    maxMonthlyBudget: Number(maxMonthlyBudget ?? 0),
-    deposit: Number(deposit ?? 0),
-    mortgageRate: Number(mortgageRate ?? 0),
-    termYears: Number(termYears ?? 0),
-    maxCommuteMins: Number(maxCommuteMins ?? 0),
-    maxCrimeIndex: Number(maxCrimeIndex ?? 0),
-  };
-
-  const scored = scoreRegions(regions, inputs);
-
-  res.json({ scored });
-});
-
-app.get("/api/search", (req, res) => {
-  const q = String(req.query.q || "").toLowerCase();
-  if (!q) {
-    return res.json({ results: [] });
-  }
-  const results = regions.filter((region) => region.name.toLowerCase().includes(q));
-  res.json({ results });
-});
-
-app.get("/api/region/:id", (req, res) => {
-  const region = regions.find((item) => item.id === req.params.id);
-  if (!region) {
-    return res.status(404).json({ error: "Region not found" });
-  }
-  res.json(region);
 });
 
 app.get("/api/price-paid", async (req, res) => {
@@ -191,6 +138,22 @@ app.get("/api/sectors", async (req, res) => {
   }
 });
 
+app.get("/api/postcode", async (req, res) => {
+  try {
+    const postcode = String(req.query.postcode || "").trim();
+    if (!postcode) {
+      return res.status(400).json({ error: "postcode is required" });
+    }
+    const location = await getPostcodeLocation(postcode);
+    if (!location) {
+      return res.status(404).json({ error: "postcode not found" });
+    }
+    res.json({ location });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch postcode" });
+  }
+});
+
 app.post("/api/sector-rankings", rateLimit, async (req, res) => {
   try {
     const {
@@ -214,6 +177,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
         return res.status(400).json({ error: "bbox is too large" });
       }
     }
+
     const safePriorities = Array.isArray(priorities) ? priorities : ["price", "commute", "schools", "crime"];
     const safeAffordability = {
       monthlyBudget: Number(affordability?.monthlyBudget ?? 0),
@@ -247,22 +211,6 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
     res.json({ rows });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to rank sectors" });
-  }
-});
-
-app.get("/api/postcode", async (req, res) => {
-  try {
-    const postcode = String(req.query.postcode || "").trim();
-    if (!postcode) {
-      return res.status(400).json({ error: "postcode is required" });
-    }
-    const location = await getPostcodeLocation(postcode);
-    if (!location) {
-      return res.status(404).json({ error: "postcode not found" });
-    }
-    res.json({ location });
-  } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to fetch postcode" });
   }
 });
 
