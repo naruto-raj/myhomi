@@ -1,53 +1,16 @@
 # Housing Map (Price Paid Explorer)
 
-Prototype with MapLibre + real UK data (Price Paid + ONS Postcode Directory) and sector ranking.
+MapLibre + real UK data (Price Paid + ONS Postcode Directory) with postcode-sector ranking.
 
-## Setup
-
+## Quick Start (Docker)
 ```bash
-npm install
-
-# in one terminal
-cd server
-npm install
-npm run dev
-
-# in another terminal
-cd ..
-npm run dev
+docker compose up -d --build
 ```
 
-## Docker (Hot Reload)
-```bash
-docker compose up --build
-```
-
-### Container URLs
+### URLs
 - Web: http://localhost:5173
 - API: http://localhost:5050
 - Postgres: localhost:5432 (user: housing_user, db: housing_map)
-
-### Docker Data Ingest (inside compose)
-```bash
-# Price Paid (fast mode)
-docker compose run --rm server sh -lc \"PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true node scripts/ingest-price-paid.js\"
-
-# ONS Postcode Directory
-docker compose run --rm server sh -lc \"node scripts/ingest-postcodes.js\"
-
-# Compute sector stats
-docker compose run --rm server sh -lc \"node scripts/compute-sector-stats.js\"
-```
-
-## Notes
-- Map uses MapLibre with a hosted style URL from `.env`.
-- Sector rankings are computed server-side (`/api/sector-rankings`).
-- Phase 3 notes live in `docs/phase-3.md`.
-- Self-hosted tiles setup in `docs/tiles.md`.
-
-## Map tiles (POC)
-- The app reads `VITE_MAP_STYLE_URL` from `.env`.
-- Current POC uses MapTiler's hosted style (non-commercial).
 
 ## Data Downloads
 ### Price Paid Data (HM Land Registry)
@@ -58,11 +21,36 @@ Suggested source:
 - `http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/pp-complete.csv`
 
 ### ONS Postcode Directory
-Download a CSV that includes `pcd/pcds`, `lat`, and `long` columns and place it at:
+Download the ZIP and place the CSV at:
 `data/postcode-directory/ons_postcode_directory.csv`
 
+Download + extract:
+```bash
+curl -L "https://www.arcgis.com/sharing/rest/content/items/295e076b89b542e497e05632706ab429/data" -o /tmp/ons_postcodes.zip
+unzip -q /tmp/ons_postcodes.zip -d /tmp/ons_postcodes
+first_csv=$(find /tmp/ons_postcodes -type f -name "*.csv" | head -n 1)
+cp "$first_csv" /Users/naveenrajg/Documents/VibeCoding/housing-map/data/postcode-directory/ons_postcode_directory.csv
+```
+
+## Docker Data Ingest
+```bash
+# Price Paid (fast mode)
+docker compose run --rm server sh -lc "PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true node scripts/ingest-price-paid.js"
+
+# ONS Postcode Directory
+docker compose run --rm server sh -lc "node scripts/ingest-postcodes.js"
+
+# Compute sector stats
+docker compose run --rm server sh -lc "node scripts/compute-sector-stats.js"
+```
+
+## DB Sanity Check
+```bash
+docker compose exec db sh -lc "/scripts/db-sanity.sh"
+```
+
 ## Environment
-Example `server/.env`:
+Example `server/.env` (local only):
 ```
 DATABASE_URL=postgres://housing_user:<PASSWORD>@localhost:5432/housing_map
 DATA_DIR=../data
@@ -75,43 +63,9 @@ Example root `.env`:
 VITE_MAP_STYLE_URL=...
 ```
 
-## Local Data Pipeline (Recommended Order)
-1) Create tables (if not present):
-```bash
-psql "$DATABASE_URL" -f server/sql/price_paid_schema.sql
-psql "$DATABASE_URL" -f server/sql/postcode_coords_schema.sql
-psql "$DATABASE_URL" -f server/sql/sector_stats.sql
-```
-
-2) Ingest Price Paid (fast mode):
-```bash
-cd server
-PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true node scripts/ingest-price-paid.js
-```
-If the CSV has a header:
-```bash
-PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=true PRICE_PAID_HAS_HEADER=true node scripts/ingest-price-paid.js
-```
-
-3) Ingest ONS Postcode Directory:
-```bash
-node scripts/ingest-postcodes.js
-```
-
-4) Compute nationwide sector stats:
-```bash
-node scripts/compute-sector-stats.js
-```
-
-5) Run servers:
-```bash
-cd server
-npm run dev
-```
-```bash
-cd ..
-npm run dev
-```
+## Notes
+- Map uses MapLibre with a hosted style URL from `.env`.
+- Sector rankings are computed server-side (`/api/sector-rankings`).
 
 ## Key APIs
 - Postcode lookup: `GET /api/postcode?postcode=SW1A1AA`
