@@ -11,19 +11,25 @@ echo "== Row counts =="
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT COUNT(*) AS price_paid_rows FROM price_paid;"
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT COUNT(*) AS postcode_rows FROM postcode_coords;"
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT COUNT(*) AS sector_rows FROM sector_stats;"
+psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT COUNT(*) AS sector_centroid_rows FROM sector_centroids;"
 
 echo "== Samples =="
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT * FROM price_paid WHERE postcode IS NOT NULL LIMIT 3;"
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT * FROM sector_stats ORDER BY transactions DESC LIMIT 3;"
+psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT * FROM sector_centroids ORDER BY transactions DESC LIMIT 3;"
 
 echo "== Postcode norm coverage =="
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT COUNT(*) AS missing_norm FROM price_paid WHERE postcode_norm IS NULL OR postcode_norm = '';"
 
 echo "== Sector stats freshness =="
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT MAX(updated_at) AS sector_stats_updated_at FROM sector_stats;"
+psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT MAX(updated_at) AS sector_centroids_updated_at FROM sector_centroids;"
 
 echo "== PostGIS =="
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT PostGIS_Version();"
 
 echo "== Table sizes =="
 psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS size FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC;"
+
+echo "== Data meta =="
+psql -U "${POSTGRES_USER:-housing_user}" -d "${POSTGRES_DB:-housing_map}" -c "SELECT key, value FROM data_meta ORDER BY key;"

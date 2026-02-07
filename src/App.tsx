@@ -39,6 +39,11 @@ function bboxEquals(a: number[] | null, b: number[] | null) {
 export default function App() {
   const [pricePaidPoints, setPricePaidPoints] = useState<PricePaidPoint[]>([]);
   const [sectors, setSectors] = useState<SectorStat[]>([]);
+  const [rankMeta, setRankMeta] = useState<{
+    price_year?: number | null;
+    inflation_latest_year?: number | null;
+    inflation_factor?: number | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewportLoading, setViewportLoading] = useState(false);
   const [currentZoom, setCurrentZoom] = useState<number | null>(null);
@@ -58,11 +63,11 @@ export default function App() {
     mortgageRate: 4.5,
     termYears: 30,
   });
-  const [scope, setScope] = useState<"viewport" | "nationwide">("viewport");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showCentroids, setShowCentroids] = useState(false);
   const [showBestFit, setShowBestFit] = useState(true);
+  const zoomThreshold = Number(import.meta.env.VITE_ZOOM_THRESHOLD || 8);
 
   const viewportTimer = useRef<number | null>(null);
   const lastBboxRef = useRef<number[] | null>(null);
@@ -86,9 +91,10 @@ export default function App() {
     ? "Loading price-paid points..."
     : "Heatmap updates as you move the map.";
 
-  const fetchRankingsForBbox = (bbox: number[]) => {
+  const fetchRankingsForBbox = (bbox: number[], zoom: number | null) => {
+    const useViewport = zoom !== null && zoom >= zoomThreshold;
     const payload = {
-      scope,
+      zoom,
       bbox,
       affordability,
       filters,
@@ -104,16 +110,21 @@ export default function App() {
 
     setViewportLoading(true);
     setSectors([]);
-    Promise.all([fetchPricePaidViewport(bbox, 2000), fetchSectorRankings(payload)])
+    const pricePromise = useViewport ? fetchPricePaidViewport(bbox, 2000) : Promise.resolve({ rows: [] });
+    Promise.all([pricePromise, fetchSectorRankings(payload)])
       .then(([priceData, rankedData]) => {
         if (requestId !== requestIdRef.current) return;
         setPricePaidPoints(priceData.rows);
         setSectors(rankedData.rows);
+        setRankMeta(rankedData.meta ?? null);
       })
       .catch(() => {
         if (requestId !== requestIdRef.current) return;
-        setPricePaidPoints([]);
+        if (!useViewport) {
+          setPricePaidPoints([]);
+        }
         setSectors([]);
+        setRankMeta(null);
       })
       .finally(() => {
         if (requestId === requestIdRef.current) {
@@ -133,6 +144,8 @@ export default function App() {
 
     const last = lastBboxRef.current;
     const lastZoom = lastZoomRef.current;
+    const zoomBucket = zoom >= zoomThreshold ? "viewport" : "nationwide";
+    const lastBucket = lastZoom !== null && lastZoom >= zoomThreshold ? "viewport" : "nationwide";
     if (last) {
       const [lMinLng, lMinLat, lMaxLng, lMaxLat] = last;
       const lWidth = Math.abs(lMaxLng - lMinLng);
@@ -143,7 +156,9 @@ export default function App() {
       const centerShift = Math.hypot(centerLng - lCenterLng, centerLat - lCenterLat);
       const minShift = Math.max(lWidth, lHeight) * 0.12;
       const zoomChanged = lastZoom !== null && Math.abs(zoom - lastZoom) >= 0.25;
-      if (centerShift < minShift && !zoomChanged) {
+      const scaleChanged = lastZoom !== null && lWidth > 0 ? Math.abs(width - lWidth) / lWidth >= 0.15 : false;
+      const bucketChanged = lastZoom !== null && zoomBucket !== lastBucket;
+      if (centerShift < minShift && !zoomChanged && !scaleChanged && !bucketChanged) {
         return;
       }
     }
@@ -156,23 +171,23 @@ export default function App() {
     }
 
     viewportTimer.current = window.setTimeout(() => {
-      fetchRankingsForBbox(bbox);
+      fetchRankingsForBbox(bbox, zoom);
     }, 600);
   };
 
   const forceRefresh = () => {
     if (!lastBboxRef.current) return;
     lastRequestKeyRef.current = null;
-    fetchRankingsForBbox(lastBboxRef.current);
+    fetchRankingsForBbox(lastBboxRef.current, lastZoomRef.current);
   };
 
   useEffect(() => {
     if (!lastBboxRef.current) return;
     if (viewportTimer.current) window.clearTimeout(viewportTimer.current);
     viewportTimer.current = window.setTimeout(() => {
-      fetchRankingsForBbox(lastBboxRef.current as number[]);
+      fetchRankingsForBbox(lastBboxRef.current as number[], lastZoomRef.current);
     }, 350);
-  }, [scope, affordability, filters, priorityOrder]);
+  }, [affordability, filters, priorityOrder]);
 
   const scoredSectors = useMemo(() => sectors, [sectors]);
 
@@ -217,7 +232,7 @@ export default function App() {
     if (!lastBboxRef.current) return "No viewport yet";
     return JSON.stringify(
       {
-        scope,
+        zoom: lastZoomRef.current,
         bbox: lastBboxRef.current,
         affordability,
         filters,
@@ -226,7 +241,7 @@ export default function App() {
       null,
       2
     );
-  }, [scope, affordability, filters, priorityOrder]);
+  }, [affordability, filters, priorityOrder, currentZoom]);
 
   return (
     <div className="min-h-screen bg-stone-100 text-stone-900">
@@ -359,33 +374,11 @@ export default function App() {
               </div>
             </div>
             <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Best Spots Scope</p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  className={`rounded-md border px-3 py-2 text-xs ${
-                    scope === "viewport"
-                      ? "border-emerald-500 bg-emerald-100 text-emerald-800"
-                      : "border-stone-300 bg-white hover:border-emerald-400/60"
-                  }`}
-                  onClick={() => setScope("viewport")}
-                >
-                  Viewport
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md border px-3 py-2 text-xs ${
-                    scope === "nationwide"
-                      ? "border-emerald-500 bg-emerald-100 text-emerald-800"
-                      : "border-stone-300 bg-white hover:border-emerald-400/60"
-                  }`}
-                  onClick={() => setScope("nationwide")}
-                >
-                  Nationwide
-                </button>
-              </div>
+              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Best Spots Mode</p>
               <p className="mt-2 text-xs text-stone-500">
-                Viewport uses nearby sectors. Nationwide uses precomputed sector stats.
+                {currentZoom !== null && currentZoom >= zoomThreshold
+                  ? "Local view (zoomed): viewport sectors."
+                  : "Nationwide view: precomputed sector stats."}
               </p>
             </div>
             <div className="rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
@@ -504,12 +497,24 @@ export default function App() {
             <p className="mt-1 text-xs text-stone-600">
               Currently ranked by price paid. Commute, schools, and crime will plug in once datasets are ingested.
             </p>
+            {rankMeta?.price_year && rankMeta?.inflation_latest_year && (
+              <p className="mt-2 text-[10px] text-stone-500">
+                Inflation-adjusted to {rankMeta.inflation_latest_year} (base year {rankMeta.price_year}, approx).
+              </p>
+            )}
             <div className="mt-3 max-h-56 space-y-2 overflow-auto text-xs text-stone-700">
               {scoredSectors.length === 0 && <p className="text-xs text-stone-500">No sectors loaded yet.</p>}
               {scoredSectors.map((sector) => (
                 <div key={sector.sector} className="flex items-center justify-between">
                   <span className="font-medium">{sector.sector}</span>
-                  <span>£{Math.round(sector.median_price).toLocaleString()}</span>
+                  <span className="text-right">
+                    £{Math.round(sector.median_price).toLocaleString()}
+                    {sector.inflation_adjusted_price ? (
+                      <span className="block text-[10px] text-stone-500">
+                        £{Math.round(sector.inflation_adjusted_price).toLocaleString()} (adj.)
+                      </span>
+                    ) : null}
+                  </span>
                 </div>
               ))}
             </div>
@@ -539,6 +544,10 @@ export default function App() {
           />
           <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-stone-200 bg-white/90 px-3 py-2 text-xs text-stone-600">
             Mock API · Phase 3
+          </div>
+          <div className="absolute bottom-4 left-4 right-4 rounded-md border border-stone-200 bg-white/90 px-3 py-2 text-[10px] text-stone-500">
+            Contains HM Land Registry data © Crown copyright and database right 2021. This data is licensed
+            under the Open Government Licence v3.0.
           </div>
         </main>
       </div>

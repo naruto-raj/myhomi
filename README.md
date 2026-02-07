@@ -49,6 +49,12 @@ docker compose run --rm server sh -lc "node scripts/compute-sector-stats.js"
 docker compose exec db sh -lc "/scripts/db-sanity.sh"
 ```
 
+## Ranking Behavior (Zoom-Based)
+- Rankings automatically switch based on zoom:
+  - `zoom >= 8` uses `sector_centroids` (fast viewport)
+  - `zoom < 8` uses `sector_stats` (nationwide)
+- Price cap = max affordable * 1.05 (derived from affordability inputs).
+
 ## Environment
 Example `server/.env` (local only):
 ```
@@ -56,16 +62,23 @@ DATABASE_URL=postgres://housing_user:<PASSWORD>@localhost:5432/housing_map
 DATA_DIR=../data
 PORT=5050
 CORS_ORIGIN=http://localhost:5173
+ZOOM_THRESHOLD=8
 ```
 
 Example root `.env`:
 ```
 VITE_MAP_STYLE_URL=...
+VITE_ZOOM_THRESHOLD=8
 ```
 
 ## Notes
 - Map uses MapLibre with a hosted style URL from `.env`.
 - Sector rankings are computed server-side (`/api/sector-rankings`).
+- Contains HM Land Registry data © Crown copyright and database right 2021.
+  This data is licensed under the Open Government Licence v3.0.
+- Inflation-adjusted prices use CPIH annual index values (2015=100) and are a
+  projection from the latest transaction year in the dataset to the latest
+  CPIH year available.
 
 ## Key APIs
 - Postcode lookup: `GET /api/postcode?postcode=SW1A1AA`

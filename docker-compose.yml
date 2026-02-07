@@ -28,6 +28,7 @@ services:
       CORS_ORIGIN: http://localhost:5173
       DATABASE_URL: postgres://housing_user:housing_pass@db:5432/housing_map
       DATA_DIR: /data
+      ZOOM_THRESHOLD: ${ZOOM_THRESHOLD:-8}
     ports:
       - "5050:5050"
     volumes:
@@ -46,6 +47,7 @@ services:
     environment:
       VITE_MAP_STYLE_URL: ${VITE_MAP_STYLE_URL}
       VITE_API_PROXY_URL: http://server:5050
+      VITE_ZOOM_THRESHOLD: ${VITE_ZOOM_THRESHOLD:-8}
     ports:
       - "5173:5173"
     volumes:

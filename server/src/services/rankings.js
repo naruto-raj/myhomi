@@ -1,4 +1,6 @@
 import { pool } from "../db.js";
+import { getDataMeta } from "./meta.js";
+import { getInflationFactor } from "./inflation.js";
 
 function normalize(value, min, max) {
   if (max - min <= 0) return 0.5;
@@ -18,32 +20,16 @@ export async function getRankedSectors({
     const [minLng, minLat, maxLng, maxLat] = bbox;
     const result = await pool.query(
       `
-        WITH filtered AS (
-          SELECT
-            pp.price,
-            pp.postcode,
-            pc.latitude,
-            pc.longitude,
-            regexp_replace(pp.postcode, '\\s+.*', '') AS outward,
-            substring(pp.postcode from '\\s+(.+)') AS inward
-          FROM price_paid pp
-          JOIN postcode_coords pc ON pc.postcode_norm = pp.postcode_norm
-          WHERE pc.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
-            AND pp.postcode IS NOT NULL
-        ),
-        sectors AS (
-          SELECT
-            outward || ' ' || substring(inward, 1, 1) AS sector,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY price) AS median_price,
-            AVG(price)::int AS avg_price,
-            COUNT(*)::int AS transactions,
-            AVG(latitude) AS latitude,
-            AVG(longitude) AS longitude
-          FROM filtered
-          WHERE inward IS NOT NULL
-          GROUP BY sector
-        )
-        SELECT * FROM sectors
+        SELECT
+          sector,
+          median_price,
+          avg_price,
+          transactions,
+          latitude,
+          longitude,
+          updated_at
+        FROM sector_centroids
+        WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
         ORDER BY transactions DESC
         LIMIT $5;
       `,
@@ -63,7 +49,7 @@ export async function getRankedSectors({
     rows = result.rows;
   }
 
-  if (!rows.length) return [];
+  if (!rows.length) return { rows: [], meta: null };
 
   const prices = rows.map((row) => Number(row.median_price || 0));
   const minPrice = Math.min(...prices);
@@ -88,7 +74,11 @@ export async function getRankedSectors({
 
   const maxPriceCap = maxAffordable * 1.05;
 
-  return rows
+  const meta = await getDataMeta();
+  const priceYear = meta.price_paid_max_year ? Number(meta.price_paid_max_year) : null;
+  const inflation = priceYear ? getInflationFactor(priceYear) : null;
+
+  const adjustedRows = rows
     .map((row) => {
       const priceScore = normalize(Number(row.median_price || 0), minPrice, maxPrice);
       const commuteScore = 0.5;
@@ -100,9 +90,24 @@ export async function getRankedSectors({
         schoolsScore * (weightMap.schools || 0) +
         (1 - crimeScore) * (weightMap.crime || 0);
 
-      return { ...row, score };
+      const inflation_adjusted_price =
+        inflation?.factor && row.median_price
+          ? Math.round(Number(row.median_price) * inflation.factor)
+          : null;
+      return { ...row, score, inflation_adjusted_price };
     })
     .filter((row) => Number(row.median_price || 0) <= maxPriceCap)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, limit);
+
+  return {
+    rows: adjustedRows,
+    meta: inflation
+      ? {
+          price_year: inflation.fromYear,
+          inflation_latest_year: inflation.latestYear,
+          inflation_factor: inflation.factor,
+        }
+      : { price_year: priceYear, inflation_latest_year: null, inflation_factor: null },
+  };
 }

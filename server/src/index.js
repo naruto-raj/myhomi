@@ -2,18 +2,21 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "node:path";
-import { getPricePaidByPostcode } from "./services/pricePaid.js";
+import { getLatestPricePaidByPostcode, getPricePaidByPostcode } from "./services/pricePaid.js";
 import { getPricePaidInViewport } from "./services/pricePaidViewport.js";
 import { getPostcodeLocation } from "./services/postcodes.js";
 import { getSectorsInViewport } from "./services/sectors.js";
 import { getSectorStats } from "./services/sectorStats.js";
 import { getRankedSectors } from "./services/rankings.js";
+import { getDataMeta } from "./services/meta.js";
+import { getInflationFactor } from "./services/inflation.js";
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 5050);
 const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
+const zoomThreshold = Number(process.env.ZOOM_THRESHOLD || 8);
 
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "1mb" }));
@@ -69,6 +72,38 @@ app.get("/api/price-paid", async (req, res) => {
     res.json({ rows });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to fetch price paid data" });
+  }
+});
+
+app.get("/api/postcode/latest", async (req, res) => {
+  try {
+    const postcode = String(req.query.postcode || "").trim();
+    if (!postcode) {
+      return res.status(400).json({ error: "postcode is required" });
+    }
+    const row = await getLatestPricePaidByPostcode(postcode);
+    if (!row) {
+      return res.status(404).json({ error: "postcode not found" });
+    }
+    const meta = await getDataMeta();
+    const priceYear = meta.price_paid_max_year ? Number(meta.price_paid_max_year) : null;
+    const inflation = priceYear ? getInflationFactor(priceYear) : null;
+    const inflationAdjusted =
+      inflation?.factor && row.price ? Math.round(Number(row.price) * inflation.factor) : null;
+
+    res.json({
+      row,
+      meta: inflation
+        ? {
+            price_year: inflation.fromYear,
+            inflation_latest_year: inflation.latestYear,
+            inflation_factor: inflation.factor,
+            inflation_adjusted_price: inflationAdjusted,
+          }
+        : { price_year: priceYear, inflation_latest_year: null, inflation_factor: null, inflation_adjusted_price: null },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch postcode details" });
   }
 });
 
@@ -157,7 +192,8 @@ app.get("/api/postcode", async (req, res) => {
 app.post("/api/sector-rankings", rateLimit, async (req, res) => {
   try {
     const {
-      scope = "viewport",
+      scope,
+      zoom,
       bbox,
       affordability,
       filters,
@@ -165,10 +201,18 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       limit = 20,
     } = req.body || {};
 
-    if (scope === "viewport" && (!Array.isArray(bbox) || bbox.length !== 4)) {
+    const zoomValue = Number(zoom);
+    const derivedScope =
+      Number.isFinite(zoomValue) && zoomValue > 0
+        ? zoomValue >= zoomThreshold
+          ? "viewport"
+          : "nationwide"
+        : scope || "viewport";
+
+    if (derivedScope === "viewport" && (!Array.isArray(bbox) || bbox.length !== 4)) {
       return res.status(400).json({ error: "bbox is required for viewport scope" });
     }
-    if (scope === "viewport") {
+    if (derivedScope === "viewport") {
       const [minLng, minLat, maxLng, maxLat] = bbox;
       if ([minLng, minLat, maxLng, maxLat].some((value) => !Number.isFinite(value))) {
         return res.status(400).json({ error: "bbox must be minLng,minLat,maxLng,maxLat" });
@@ -191,14 +235,14 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       maxCrime: Number(filters?.maxCrime ?? 100),
     };
 
-    const cacheKey = `rank:${scope}:${JSON.stringify(bbox)}:${JSON.stringify(safeAffordability)}:${JSON.stringify(
+    const cacheKey = `rank:${derivedScope}:${JSON.stringify(bbox)}:${JSON.stringify(safeAffordability)}:${JSON.stringify(
       safeFilters
     )}:${JSON.stringify(safePriorities)}:${limit}`;
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
 
-    const rows = await getRankedSectors({
-      scope,
+    const result = await getRankedSectors({
+      scope: derivedScope,
       bbox,
       affordability: safeAffordability,
       filters: safeFilters,
@@ -206,8 +250,8 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       limit: Math.min(Number(limit), 100),
     });
 
-    setCache(cacheKey, { rows }, 20_000);
-    res.json({ rows });
+    setCache(cacheKey, result, 20_000);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to rank sectors" });
   }

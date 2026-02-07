@@ -7,6 +7,26 @@ export type PricePaidPoint = {
   postcode: string;
 };
 
+export type PostcodeLatest = {
+  transaction_id: string;
+  price: number;
+  date_of_transfer: string;
+  postcode: string;
+  postcode_norm?: string;
+  property_type?: string;
+  old_new?: string;
+  duration?: string;
+  paon?: string;
+  saon?: string;
+  street?: string;
+  locality?: string;
+  town_city?: string;
+  district?: string;
+  county?: string;
+  ppd_category_type?: string;
+  record_status?: string;
+};
+
 export type SectorStat = {
   sector: string;
   median_price: number;
@@ -15,6 +35,7 @@ export type SectorStat = {
   latitude: number;
   longitude: number;
   score?: number;
+  inflation_adjusted_price?: number | null;
 };
 
 async function json<T>(input: RequestInfo, init?: RequestInit) {
@@ -46,8 +67,21 @@ export function fetchPricePaidByPostcode(postcode: string, limit = 50) {
   return json<{ rows: PricePaidPoint[] }>(`/api/price-paid?${params.toString()}`);
 }
 
+export function fetchPostcodeLatest(postcode: string) {
+  const params = new URLSearchParams({ postcode });
+  return json<{
+    row: PostcodeLatest;
+    meta?: {
+      price_year?: number | null;
+      inflation_latest_year?: number | null;
+      inflation_factor?: number | null;
+      inflation_adjusted_price?: number | null;
+    } | null;
+  }>(`/api/postcode/latest?${params.toString()}`);
+}
+
 export function fetchSectorRankings(payload: {
-  scope: "viewport" | "nationwide";
+  zoom?: number;
   bbox?: number[];
   affordability: {
     monthlyBudget: number;
@@ -63,7 +97,14 @@ export function fetchSectorRankings(payload: {
   priorities: string[];
   limit?: number;
 }) {
-  return json<{ rows: SectorStat[] }>(`/api/sector-rankings`, {
+  return json<{
+    rows: SectorStat[];
+    meta?: {
+      price_year?: number | null;
+      inflation_latest_year?: number | null;
+      inflation_factor?: number | null;
+    } | null;
+  }>(`/api/sector-rankings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

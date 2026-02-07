@@ -27,6 +27,7 @@ export default function MapView({
   const mapRef = useRef<Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const showCentroidsRef = useRef(showCentroids);
+  const onViewportChangeRef = useRef<Props["onViewportChange"]>(onViewportChange);
 
   const pricePoints = useMemo(
     () => ({
@@ -69,6 +70,10 @@ export default function MapView({
   useEffect(() => {
     showCentroidsRef.current = showCentroids;
   }, [showCentroids]);
+
+  useEffect(() => {
+    onViewportChangeRef.current = onViewportChange;
+  }, [onViewportChange]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -212,16 +217,16 @@ export default function MapView({
         popup.remove();
       });
 
-      if (onViewportChange) {
+      if (onViewportChangeRef.current) {
         const bounds = map.getBounds();
-        onViewportChange(
+        onViewportChangeRef.current(
           [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
           map.getZoom()
         );
       }
 
       map.on("moveend", () => {
-        if (!onViewportChange) return;
+        if (!onViewportChangeRef.current) return;
         const bounds = map.getBounds();
         const bbox = [
           bounds.getWest(),
@@ -229,7 +234,7 @@ export default function MapView({
           bounds.getEast(),
           bounds.getNorth(),
         ];
-        onViewportChange(bbox, map.getZoom());
+        onViewportChangeRef.current(bbox, map.getZoom());
       });
     });
 
