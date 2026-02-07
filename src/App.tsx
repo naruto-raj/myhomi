@@ -130,9 +130,11 @@ export default function App() {
     setViewportLoading(true);
     setSectors([]);
     const pricePromise = useViewport ? fetchPricePaidViewport(bbox, 5000) : Promise.resolve({ rows: [] });
-    const heatmapPromise = useViewport
-      ? fetchAffordableHeatmap(payload).catch(() => ({ mode: "grid", rows: [] }))
-      : Promise.resolve({ mode: "grid", rows: [] });
+    const heatmapLimit = useViewport ? 2000 : 1200;
+    const heatmapPromise = fetchAffordableHeatmap({ ...payload, limit: heatmapLimit }).catch(() => ({
+      mode: "grid",
+      rows: [],
+    }));
 
     Promise.all([pricePromise, fetchSectorRankings(payload), heatmapPromise])
       .then(([priceData, rankedData, heatmapData]) => {
@@ -263,10 +265,9 @@ export default function App() {
       <div className="grid min-h-screen grid-cols-1 gap-0 lg:grid-cols-[380px_1fr]">
         <aside className="border-b border-stone-200 bg-white p-6 lg:border-b-0 lg:border-r">
           <div className="mb-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-500">Phase 3</p>
             <h1 className="text-2xl font-semibold text-stone-900">myfirsthomie</h1>
             <p className="mt-2 text-sm text-stone-600">
-              Search by postcode and explore price paid density with a live heatmap.
+              Find affordable areas and explore recent price paid density on a live map.
             </p>
           </div>
 
@@ -606,9 +607,6 @@ export default function App() {
             onViewportChange={handleViewportChange}
             focusPoint={postcodeLocation}
           />
-          <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-stone-200 bg-white/90 px-3 py-2 text-xs text-stone-600">
-            Mock API · Phase 3
-          </div>
           <div className="absolute bottom-4 left-4 right-4 rounded-md border border-stone-200 bg-white/90 px-3 py-2 text-[10px] text-stone-500">
             Contains HM Land Registry data © Crown copyright and database right 2021. This data is licensed
             under the Open Government Licence v3.0.

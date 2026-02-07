@@ -281,7 +281,8 @@ app.get("/api/price-paid/viewport", rateLimit, async (req, res) => {
       return res.status(400).json({ error: "bbox must be minLng,minLat,maxLng,maxLat" });
     }
     const [minLng, minLat, maxLng, maxLat] = parts;
-    if (Math.abs(maxLng - minLng) > 5 || Math.abs(maxLat - minLat) > 5) {
+    const maxHeatmapSpan = Number(process.env.HEATMAP_MAX_SPAN || 20);
+    if (Math.abs(maxLng - minLng) > maxHeatmapSpan || Math.abs(maxLat - minLat) > maxHeatmapSpan) {
       return res.status(400).json({ error: "bbox is too large" });
     }
     const limit = Math.min(Number(req.query.limit || 2000), 5000);
