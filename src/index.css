@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Space+Grotesk:wght@400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -6,14 +6,77 @@
 
 :root {
   font-family: "Space Grotesk", system-ui, sans-serif;
-  color-scheme: dark;
+  color-scheme: light;
+  --font-display: "Fraunces", "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Space Grotesk", system-ui, sans-serif;
+  --ink: #1f2937;
+  --muted: #64748b;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(226, 232, 240, 0.6), transparent 55%),
+    radial-gradient(circle at 30% 40%, rgba(209, 250, 229, 0.45), transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(253, 230, 138, 0.35), transparent 45%),
+    linear-gradient(120deg, #f8fafc 0%, #fef3c7 45%, #f1f5f9 100%);
 }
 
-body,
 .maplibregl-map {
-  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-family: var(--font-body);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.map-popup {
+  font-family: var(--font-body);
+}
+
+.map-popup__card {
+  position: relative;
+  min-width: 230px;
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 14px 16px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+  border: 1px solid #e2e8f0;
+}
+
+.map-popup__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+.map-popup__close:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.maplibregl-popup-content {
+  background: transparent;
+  padding: 0;
+  border: none;
+  box-shadow: none;
 }

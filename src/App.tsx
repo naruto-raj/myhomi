@@ -249,10 +249,10 @@ export default function App() {
   }, [affordability, filters, priorityOrder, propertyType, currentZoom]);
 
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-900">
+    <div className="min-h-screen text-slate-900">
       {viewportLoading && (
         <div className="pointer-events-none fixed left-0 top-0 z-50 h-1 w-full overflow-hidden bg-transparent">
-          <div className="h-full w-1/3 animate-[loading_1.2s_ease_infinite] rounded-full bg-emerald-500" />
+          <div className="h-full w-1/3 animate-[loading_1.2s_ease_infinite] rounded-full bg-emerald-500/90" />
         </div>
       )}
       <style>{`
@@ -262,23 +262,28 @@ export default function App() {
           100% { transform: translateX(200%); width: 30%; }
         }
       `}</style>
-      <div className="grid min-h-screen grid-cols-1 gap-0 lg:grid-cols-[380px_1fr]">
-        <aside className="border-b border-stone-200 bg-white p-6 lg:border-b-0 lg:border-r">
-          <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-stone-900">myfirsthomie</h1>
-            <p className="mt-2 text-sm text-stone-600">
-              Find affordable areas and explore recent price paid density on a live map.
+      <div className="grid min-h-screen grid-cols-1 gap-0 lg:h-screen lg:grid-cols-[420px_1fr] lg:overflow-hidden">
+        <aside className="border-b border-slate-200/60 bg-white/75 p-6 shadow-[0_10px_30px_-25px_rgba(15,23,42,0.5)] backdrop-blur lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <div className="mb-8">
+            <h1 className="font-display text-3xl font-semibold text-slate-900">myfirsthomie</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Discover affordable pockets with CPIH‑adjusted prices, then explore the latest sales on a live map.
             </p>
+            <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-600">
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">Affordability‑first</span>
+              <span className="rounded-full bg-slate-100 px-3 py-1">England & Wales</span>
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">CPIH‑adjusted</span>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Affordability</p>
-              <div className="mt-3 space-y-3">
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Affordability</p>
+              <div className="mt-4 space-y-4">
                 <div>
-                  <label className="text-xs text-stone-600">Monthly Budget (£)</label>
+                  <label className="text-xs text-slate-600">Monthly Budget (£)</label>
                   <input
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     type="number"
                     min={300}
                     step={50}
@@ -289,9 +294,9 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-stone-600">Deposit (£)</label>
+                  <label className="text-xs text-slate-600">Deposit (£)</label>
                   <input
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     type="number"
                     min={0}
                     step={1000}
@@ -299,11 +304,11 @@ export default function App() {
                     onChange={(e) => setAffordability({ ...affordability, deposit: Number(e.target.value) })}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-stone-600">Rate (%)</label>
+                    <label className="text-xs text-slate-600">Rate (%)</label>
                     <input
-                      className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       type="number"
                       min={0}
                       step={0.1}
@@ -314,9 +319,9 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-stone-600">Term (Years)</label>
+                    <label className="text-xs text-slate-600">Term (Years)</label>
                     <input
-                      className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       type="number"
                       min={5}
                       max={40}
@@ -325,13 +330,13 @@ export default function App() {
                     />
                   </div>
                 </div>
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
                   Max affordable price: £{Math.round(maxAffordable).toLocaleString()}
                 </div>
                 <div>
-                  <label className="text-xs text-stone-600">Property type</label>
+                  <label className="text-xs text-slate-600">Property type</label>
                   <select
-                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                     value={propertyType}
                     onChange={(e) => setPropertyType(e.target.value)}
                   >
@@ -343,11 +348,11 @@ export default function App() {
                     <option value="O">Other</option>
                   </select>
                 </div>
-                <div className="rounded-md border border-stone-200 bg-white p-2">
-                  <label className="text-xs text-stone-600">Postcode (optional)</label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <label className="text-xs text-slate-600">Postcode (optional)</label>
                   <form onSubmit={handlePostcodeSearch} className="mt-1 flex gap-2">
                     <input
-                      className="w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       type="text"
                       placeholder="e.g., NW7 1SP"
                       value={postcodeQuery}
@@ -355,53 +360,53 @@ export default function App() {
                     />
                     <button
                       type="submit"
-                      className="rounded-md border border-emerald-500 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-700"
+                      className="rounded-xl border border-emerald-500 bg-emerald-500/20 px-4 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/30"
                     >
                       Go
                     </button>
                   </form>
-                  {postcodeError && <p className="mt-1 text-xs text-rose-600">{postcodeError}</p>}
+                  {postcodeError && <p className="mt-2 text-xs text-rose-600">{postcodeError}</p>}
                   {postcodeResults.length > 0 && (
-                    <p className="mt-1 text-xs text-stone-600">
+                    <p className="mt-2 text-xs text-slate-600">
                       {postcodeResults.length} price paid records for {postcodeQuery.toUpperCase()}
                     </p>
                   )}
                 </div>
               </div>
             </div>
-            <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Affordable Range (By Type)</p>
-              <p className="mt-1 text-xs text-stone-500">
+            <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Affordable Range (By Type)</p>
+              <p className="mt-1 text-xs text-slate-500">
                 Based on latest sales within your budget for the current zoom.
               </p>
-              <div className="mt-3 space-y-2 text-xs text-stone-700">
+              <div className="mt-4 space-y-2 text-xs text-slate-700">
                 {typeRanges.length === 0 && (
-                  <p className="text-xs text-stone-500">No affordable ranges yet for this view.</p>
+                  <p className="text-xs text-slate-500">No affordable ranges yet for this view.</p>
                 )}
                 {typeRanges.map((range) => (
-                  <div key={range.property_type} className="flex items-center justify-between">
-                    <span className="font-medium">
+                  <div key={range.property_type} className="flex items-center justify-between rounded-xl bg-slate-50 px-2 py-2">
+                    <span className="font-medium text-slate-700">
                       {propertyTypeLabels[range.property_type] ?? range.property_type}
-                      <span className="ml-2 text-[10px] text-stone-500">({range.count})</span>
+                      <span className="ml-2 text-[10px] text-slate-500">({range.count})</span>
                     </span>
-                    <span className="text-right text-xs text-stone-600">
+                    <span className="text-right text-xs text-slate-600">
                       £{range.min_price_adj.toLocaleString()}–£{range.max_price_adj.toLocaleString()}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Best Spots Mode</p>
-              <p className="mt-2 text-xs text-stone-500">
+            <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Coverage Mode</p>
+              <p className="mt-2 text-xs text-slate-500">
                 {currentZoom !== null && currentZoom >= zoomThreshold
                   ? "Local view (zoomed): viewport sectors."
                   : "Nationwide view: precomputed sector stats."}
               </p>
             </div>
-            <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Debug Layers</p>
-              <div className="mt-3 space-y-2 text-xs text-stone-700">
+            <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Map Layers</p>
+              <div className="mt-3 space-y-2 text-xs text-slate-700">
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -410,7 +415,7 @@ export default function App() {
                   />
                   Show best-fit heatmap
                 </label>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-[10px] text-slate-500">
                   Best-fit heatmap uses CPIH-adjusted affordability.
                 </p>
                 <label className="flex items-center gap-2">
@@ -432,15 +437,15 @@ export default function App() {
                 <div className="pt-2">
                   <button
                     type="button"
-                    className="rounded-md border border-stone-300 bg-white px-3 py-2 text-xs"
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700"
                     onClick={forceRefresh}
                   >
                     Refresh results
                   </button>
                 </div>
-                <div className="mt-2 rounded-md border border-stone-200 bg-white p-2">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500">Last Payload</div>
-                  <pre className="mt-1 max-h-32 overflow-auto text-[10px] text-stone-600">
+                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Last Payload</div>
+                  <pre className="mt-1 max-h-32 overflow-auto text-[10px] text-slate-600">
 {lastPayloadPreview}
                   </pre>
                 </div>
@@ -450,9 +455,9 @@ export default function App() {
 
           {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
           {postcodeResults.length > 0 && (
-            <div className="mt-6 rounded-md border border-stone-200 bg-white p-4 text-sm">
-              <p className="font-semibold text-stone-900">Postcode Price Paid</p>
-              <div className="mt-2 max-h-40 space-y-2 overflow-auto text-xs text-stone-700">
+            <div className="mt-6 rounded-2xl border border-slate-200/70 bg-white/90 p-4 text-sm shadow-sm">
+              <p className="font-semibold text-slate-900">Postcode Price Paid</p>
+              <div className="mt-3 max-h-40 space-y-2 overflow-auto text-xs text-slate-700">
                 {postcodeResults.slice(0, 10).map((row) => (
                   <div key={row.transaction_id} className="flex items-center justify-between">
                     <span>£{row.price.toLocaleString()}</span>
@@ -462,13 +467,13 @@ export default function App() {
               </div>
             </div>
           )}
-          <div className="mt-6 rounded-md border border-stone-200 bg-white p-4 text-sm">
-            <p className="font-semibold text-stone-900">Best Postcode Sectors</p>
-            <p className="mt-1 text-xs text-stone-600">
+          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-white/90 p-4 text-sm shadow-sm">
+            <p className="font-semibold text-slate-900">Best Postcode Sectors</p>
+            <p className="mt-1 text-xs text-slate-600">
               Ranked by latest affordable sale density (CPIH-adjusted). Commute, schools, and crime will plug in once datasets are ingested.
             </p>
             {rankMeta?.price_year && rankMeta?.inflation_latest_year && (
-              <p className="mt-2 text-[10px] text-stone-500">
+              <p className="mt-2 text-[10px] text-slate-500">
                 CPIH (2015=100): {rankMeta.price_year} {rankMeta.inflation_base_index ?? "—"} →{" "}
                 {rankMeta.inflation_latest_year} {rankMeta.inflation_latest_index ?? "—"}
                 {rankMeta.inflation_factor
@@ -476,25 +481,25 @@ export default function App() {
                   : ""}
               </p>
             )}
-            <div className="mt-3 max-h-56 space-y-2 overflow-auto text-xs text-stone-700">
-              {scoredSectors.length === 0 && <p className="text-xs text-stone-500">No sectors loaded yet.</p>}
+            <div className="mt-4 max-h-56 space-y-2 overflow-auto text-xs text-slate-700">
+              {scoredSectors.length === 0 && <p className="text-xs text-slate-500">No sectors loaded yet.</p>}
               {scoredSectors.map((sector) => (
                 <button
                   key={sector.sector}
                   type="button"
                   onClick={() => setSelectedSector({ ...sector })}
-                  className="flex w-full items-center justify-between rounded-md border border-transparent px-2 py-1 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60"
+                  className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60"
                 >
                   <span>
                     <span className="font-medium">{sector.sector}</span>
-                    <span className="block text-[10px] text-stone-500">
+                    <span className="block text-[10px] text-slate-500">
                       Affordable latest sales: {sector.transactions ?? 0}
                     </span>
                   </span>
                   <span className="text-right">
                     £{Math.round(sector.median_price).toLocaleString()}
                     {sector.median_price_adj ?? sector.inflation_adjusted_price ? (
-                      <span className="block text-[10px] text-stone-500">
+                      <span className="block text-[10px] text-slate-500">
                         £{Math.round(sector.median_price_adj ?? sector.inflation_adjusted_price ?? 0).toLocaleString()} (adj.)
                       </span>
                     ) : null}
@@ -504,47 +509,47 @@ export default function App() {
             </div>
           </div>
 
-          <div className="mt-6 rounded-md border border-stone-200 bg-white p-4 text-sm">
-            <p className="font-semibold text-stone-900">Price Paid Layer</p>
-            <p className="mt-1 text-xs text-stone-600">{viewportNotice}</p>
-            <p className="mt-1 text-xs text-stone-500">
+          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-white/90 p-4 text-sm shadow-sm">
+            <p className="font-semibold text-slate-900">Price Paid Coverage</p>
+            <p className="mt-1 text-xs text-slate-600">{viewportNotice}</p>
+            <p className="mt-1 text-xs text-slate-500">
               Current zoom: {currentZoom ? currentZoom.toFixed(1) : "--"}
             </p>
             {pricePaidPoints.length > 0 && (
-              <p className="mt-2 text-xs text-stone-600">{pricePaidPoints.length} records loaded.</p>
+              <p className="mt-2 text-xs text-slate-600">{pricePaidPoints.length} records loaded.</p>
             )}
           </div>
 
-          <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Priority Order</p>
-            <p className="mt-1 text-xs text-stone-500">Data not loaded yet.</p>
+          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-slate-50 p-4 opacity-70">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Ranking Preferences</p>
+            <p className="mt-1 text-xs text-slate-500">Data not loaded yet.</p>
             <div className="mt-3 space-y-2">
               {priorityOrder.map((value, idx) => {
                 const label = priorityOptions.find((opt) => opt.value === value)?.label ?? value;
                 return (
                   <div
                     key={`priority-${value}`}
-                    className="flex items-center gap-2 rounded-md border border-stone-200 bg-white px-2 py-2 text-xs text-stone-400"
+                    className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-400"
                   >
-                    <span className="rounded border border-stone-200 bg-stone-100 px-2 py-1 text-[10px] text-stone-400">
+                    <span className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] text-slate-400">
                       ⋮⋮
                     </span>
                     <span className="font-semibold">
                       #{idx + 1} · {label}
                     </span>
-                    <span className="ml-auto text-[10px] text-stone-400">Weight {4 - idx}</span>
+                    <span className="ml-auto text-[10px] text-slate-400">Weight {4 - idx}</span>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Filters</p>
-            <p className="mt-1 text-xs text-stone-500">Data not loaded yet.</p>
+          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-slate-50 p-4 opacity-70">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Filters</p>
+            <p className="mt-1 text-xs text-slate-500">Data not loaded yet.</p>
             <div className="mt-3 space-y-3">
               <div>
-                <label className="text-xs text-stone-600">
+                <label className="text-xs text-slate-600">
                   Max Commute (mins): <span className="font-semibold">{filters.maxCommute}</span>
                 </label>
                 <input
@@ -559,7 +564,7 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="text-xs text-stone-600">
+                <label className="text-xs text-slate-600">
                   Min Schools Score: <span className="font-semibold">{filters.minSchools}</span>
                 </label>
                 <input
@@ -574,7 +579,7 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="text-xs text-stone-600">
+                <label className="text-xs text-slate-600">
                   Max Crime Index: <span className="font-semibold">{filters.maxCrime}</span>
                 </label>
                 <input
@@ -592,24 +597,26 @@ export default function App() {
           </div>
         </aside>
 
-        <main className="relative">
-          <MapView
-            pricePaidPoints={pricePaidPoints}
-            sectors={scoredSectors}
-            affordableHeatmap={affordableHeatmap}
-            showHeatmap={showHeatmap}
-            showCentroids={showCentroids}
-            showBestFit={showBestFit}
-            affordability={affordability}
-            maxAffordable={maxAffordable}
-            propertyType={propertyType}
-            selectedSector={selectedSector}
-            onViewportChange={handleViewportChange}
-            focusPoint={postcodeLocation}
-          />
-          <div className="absolute bottom-4 left-4 right-4 rounded-md border border-stone-200 bg-white/90 px-3 py-2 text-[10px] text-stone-500">
-            Contains HM Land Registry data © Crown copyright and database right 2021. This data is licensed
-            under the Open Government Licence v3.0.
+        <main className="relative p-4 lg:h-screen lg:p-6">
+          <div className="relative h-[70vh] min-h-[520px] overflow-hidden rounded-3xl border border-slate-200/70 bg-white/70 shadow-[0_20px_50px_-40px_rgba(15,23,42,0.6)] lg:h-full">
+            <MapView
+              pricePaidPoints={pricePaidPoints}
+              sectors={scoredSectors}
+              affordableHeatmap={affordableHeatmap}
+              showHeatmap={showHeatmap}
+              showCentroids={showCentroids}
+              showBestFit={showBestFit}
+              affordability={affordability}
+              maxAffordable={maxAffordable}
+              propertyType={propertyType}
+              selectedSector={selectedSector}
+              onViewportChange={handleViewportChange}
+              focusPoint={postcodeLocation}
+            />
+            <div className="pointer-events-none absolute bottom-4 left-4 right-4 rounded-xl border border-slate-200/70 bg-white/90 px-3 py-2 text-[10px] text-slate-500 shadow-sm">
+              Contains HM Land Registry data © Crown copyright and database right 2021. This data is licensed
+              under the Open Government Licence v3.0.
+            </div>
           </div>
         </main>
       </div>

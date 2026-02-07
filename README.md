@@ -80,6 +80,13 @@ VITE_ZOOM_THRESHOLD=8
   projection from the latest transaction year in the dataset to the latest
   CPIH year available.
 
+## Backlog (TBD Adapters)
+The following adapters exist as placeholders and are not wired up yet:
+- `server/src/adapters/commute.js`
+- `server/src/adapters/crime.js`
+- `server/src/adapters/landRegistry.js`
+- `server/src/adapters/schools.js`
+
 ## Key APIs
 - Postcode lookup: `GET /api/postcode?postcode=SW1A1AA`
 - Price paid by postcode: `GET /api/price-paid?postcode=SW1A1AA`

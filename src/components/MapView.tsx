@@ -227,7 +227,7 @@ export default function MapView({
 
       const inflationLine =
         adjusted !== null
-          ? `<div style="color:#0f172a;">£${Number(adjusted).toLocaleString()}</div>`
+          ? `<div style="color:#0f172a; font-weight:700; font-size:18px;">£${Number(adjusted).toLocaleString()}</div>`
           : `<div style="color:#94a3b8">Unavailable</div>`;
 
       const pctBadge =
@@ -253,31 +253,52 @@ export default function MapView({
           : "";
 
       const html = `
-        <div style="font-family:ui-sans-serif,system-ui,-apple-system; min-width:200px; border-radius:12px; background:#ffffff; padding:12px 14px; box-shadow:0 10px 30px rgba(15,23,42,0.15); border:1px solid #e2e8f0;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <div style="font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#64748b;">${label}</div>
-            ${pctBadge}
-          </div>
-          <div style="margin-top:6px; font-size:16px; font-weight:700; color:#0f172a;">${row?.postcode ?? "Nearest sale"}</div>
-          <div style="margin-top:2px; font-size:12px; color:#64748b;">${date}${year ? ` (${year})` : ""}</div>
-          <div style="margin-top:2px; font-size:12px; color:#94a3b8;">${propertyTypeLabel}</div>
+        <div class="map-popup">
+          <div class="map-popup__card">
+            <button type="button" class="map-popup__close" aria-label="Close">×</button>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#64748b;">${label}</div>
+              ${pctBadge}
+            </div>
+            <div style="margin-top:8px; font-size:18px; font-weight:700; color:#0f172a; font-family:var(--font-display, ui-serif, Georgia, serif);">
+              ${row?.postcode ?? "Nearest sale"}
+            </div>
+            <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
+              <span style="padding:3px 8px; border-radius:999px; background:#fef3c7; font-size:11px; color:#92400e;">
+                ${propertyTypeLabel}
+              </span>
+            </div>
 
-          <div style="margin-top:10px; display:grid; grid-template-columns:1fr; gap:6px;">
-            <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
-              <span>Last price</span>
-              <span style="color:#0f172a;font-weight:600;">£${price ? Number(price).toLocaleString() : "—"}</span>
+            <div style="margin-top:12px; padding:10px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0;">
+              <div style="display:flex;justify-content:space-between;align-items:end;gap:8px;">
+                <span style="font-size:11px; color:#64748b;">Adj. ${latestYear ?? ""}</span>
+                ${inflationLine}
+              </div>
+              <div style="margin-top:8px; display:flex;justify-content:space-between;align-items:end;gap:8px;">
+                <span style="font-size:11px; color:#64748b;">Last price</span>
+                <span style="font-size:15px; font-weight:600; color:#0f172a;">
+                  £${price ? Number(price).toLocaleString() : "—"}
+                </span>
+              </div>
+              <div style="margin-top:4px; font-size:11px; color:#94a3b8;">
+                ${date}${year ? ` (${year})` : ""}
+              </div>
             </div>
-            <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
-              <span>Adj. ${latestYear ?? ""}</span>
-              ${inflationLine}
+
+            <div style="margin-top:10px; display:grid; grid-template-columns:1fr; gap:6px;">
+              ${sectorLine}
+              <div style="font-size:10px; color:#94a3b8;">${inflationMeta}</div>
             </div>
-            ${sectorLine}
-            <div style="font-size:10px; color:#94a3b8;">${inflationMeta}</div>
           </div>
         </div>
       `;
 
       clickPopup.setLngLat([targetLng, targetLat]).setHTML(html).addTo(map);
+      const popupEl = clickPopup.getElement();
+      const closeButton = popupEl.querySelector(".map-popup__close");
+      if (closeButton) {
+        closeButton.onclick = () => clickPopup.remove();
+      }
     },
     []
   );
@@ -437,7 +458,7 @@ export default function MapView({
       });
 
       const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
-      const clickPopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false });
+      const clickPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
       clickPopupRef.current = clickPopup;
 
       map.on("mousemove", "sector-points", (event) => {
