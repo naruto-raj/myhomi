@@ -15,6 +15,7 @@ import { getSectorStats } from "./services/sectorStats.js";
 import { getRankedSectors } from "./services/rankings.js";
 import { getDataMeta } from "./services/meta.js";
 import { getInflationFactor } from "./services/inflation.js";
+import { getAffordableHeatmap } from "./services/affordableHeatmap.js";
 
 dotenv.config();
 
@@ -62,11 +63,16 @@ function rateLimit(req, res, next) {
   next();
 }
 
+function safeNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
 function computeMaxAffordable(affordability) {
-  const monthlyBudget = Number(affordability?.monthlyBudget ?? 0);
-  const deposit = Number(affordability?.deposit ?? 0);
-  const mortgageRate = Number(affordability?.mortgageRate ?? 0);
-  const termYears = Number(affordability?.termYears ?? 0);
+  const monthlyBudget = safeNumber(affordability?.monthlyBudget);
+  const deposit = safeNumber(affordability?.deposit);
+  const mortgageRate = safeNumber(affordability?.mortgageRate);
+  const termYears = safeNumber(affordability?.termYears);
   const monthlyRate = mortgageRate / 100 / 12;
   const n = termYears * 12;
   if (n <= 0) return deposit;
@@ -381,25 +387,23 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
     }
 
     const safePriorities = Array.isArray(priorities) ? priorities : ["price", "commute", "schools", "crime"];
-    const numOrZero = (value) => {
-      const num = Number(value);
-      return Number.isFinite(num) ? num : 0;
-    };
     const safeAffordability = {
-      monthlyBudget: numOrZero(affordability?.monthlyBudget),
-      deposit: numOrZero(affordability?.deposit),
-      mortgageRate: numOrZero(affordability?.mortgageRate),
-      termYears: numOrZero(affordability?.termYears),
+      monthlyBudget: safeNumber(affordability?.monthlyBudget),
+      deposit: safeNumber(affordability?.deposit),
+      mortgageRate: safeNumber(affordability?.mortgageRate),
+      termYears: safeNumber(affordability?.termYears),
     };
     const safeFilters = {
-      maxCommute: numOrZero(filters?.maxCommute ?? 120),
-      minSchools: numOrZero(filters?.minSchools ?? 0),
-      maxCrime: numOrZero(filters?.maxCrime ?? 100),
+      maxCommute: safeNumber(filters?.maxCommute ?? 120),
+      minSchools: safeNumber(filters?.minSchools ?? 0),
+      maxCrime: safeNumber(filters?.maxCrime ?? 100),
     };
     const safePropertyType =
       typeof propertyType === "string" && propertyType.trim() !== ""
         ? propertyType.trim().toUpperCase()
         : "ALL";
+    const maxAffordable = computeMaxAffordable(safeAffordability);
+    const maxPriceCap = Number.isFinite(maxAffordable) ? Math.floor(maxAffordable * 1.05) : 0;
 
     const cacheKey = `rank:${derivedScope}:${JSON.stringify(bbox)}:${JSON.stringify(safeAffordability)}:${JSON.stringify(
       safeFilters
@@ -417,10 +421,86 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       limit: Math.min(Number(limit), 100),
     });
 
-    setCache(cacheKey, result, 20_000);
-    res.json(result);
+    const payload = {
+      ...result,
+      meta: {
+        ...(result.meta || {}),
+        affordability_cap: maxPriceCap,
+        property_type: safePropertyType,
+        zoom: Number(zoom),
+      },
+    };
+
+    setCache(cacheKey, payload, 20_000);
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to rank sectors" });
+  }
+});
+
+app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
+  try {
+    const { zoom, bbox, affordability, propertyType, limit = 5000 } = req.body || {};
+    if (!Array.isArray(bbox) || bbox.length !== 4) {
+      return res.status(400).json({ error: "bbox is required" });
+    }
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    if ([minLng, minLat, maxLng, maxLat].some((value) => !Number.isFinite(value))) {
+      return res.status(400).json({ error: "bbox must be minLng,minLat,maxLng,maxLat" });
+    }
+    if (Math.abs(maxLng - minLng) > 5 || Math.abs(maxLat - minLat) > 5) {
+      return res.status(400).json({ error: "bbox is too large" });
+    }
+    const safeAffordability = {
+      monthlyBudget: safeNumber(affordability?.monthlyBudget),
+      deposit: safeNumber(affordability?.deposit),
+      mortgageRate: safeNumber(affordability?.mortgageRate),
+      termYears: safeNumber(affordability?.termYears),
+    };
+    const maxAffordable = computeMaxAffordable(safeAffordability);
+    const maxPriceCap = Number.isFinite(maxAffordable) ? Math.floor(maxAffordable * 1.05) : 0;
+    const safePropertyType =
+      typeof propertyType === "string" && propertyType.trim() !== ""
+        ? propertyType.trim().toUpperCase()
+        : "ALL";
+
+    if (!Number.isFinite(maxPriceCap) || maxPriceCap <= 0) {
+      return res.json({
+        mode: "grid",
+        rows: [],
+        meta: {
+          affordability_cap: maxPriceCap,
+          property_type: safePropertyType,
+          zoom: Number(zoom),
+        },
+      });
+    }
+
+    const cacheKey = `affordable-heatmap:${zoom}:${bbox.join(",")}:${maxPriceCap}:${safePropertyType}:${limit}`;
+    const cached = getCache(cacheKey);
+    if (cached) return res.json(cached);
+
+    const result = await getAffordableHeatmap({
+      bbox,
+      maxPriceCap,
+      propertyType: safePropertyType,
+      zoom: Number(zoom),
+      pointZoomThreshold: Number(process.env.HEATMAP_POINT_ZOOM || 10),
+      limit: Math.min(Number(limit), 10000),
+    });
+    const payload = {
+      ...result,
+      meta: {
+        affordability_cap: maxPriceCap,
+        property_type: safePropertyType,
+        zoom: Number(zoom),
+      },
+    };
+    setCache(cacheKey, payload, 20_000);
+    res.json(payload);
+  } catch (err) {
+    console.error("affordable-heatmap failed", err);
+    res.status(500).json({ error: err.message || "Failed to fetch affordable heatmap" });
   }
 });
 

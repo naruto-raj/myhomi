@@ -47,6 +47,13 @@ export type PropertyTypeRange = {
   count: number;
 };
 
+export type AffordableHeatmapPoint = {
+  latitude: number;
+  longitude: number;
+  weight?: number;
+  count?: number;
+};
+
 async function json<T>(input: RequestInfo, init?: RequestInit) {
   const res = await fetch(input, init);
   if (!res.ok) {
@@ -180,6 +187,29 @@ export function fetchSectorRankings(payload: {
       type_ranges?: PropertyTypeRange[];
     } | null;
   }>(`/api/sector-rankings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAffordableHeatmap(payload: {
+  zoom?: number;
+  bbox: number[];
+  affordability: {
+    monthlyBudget: number;
+    deposit: number;
+    mortgageRate: number;
+    termYears: number;
+  };
+  propertyType?: string;
+  limit?: number;
+}) {
+  return json<{
+    mode: "points" | "grid";
+    rows: AffordableHeatmapPoint[];
+    gridSize?: number;
+  }>(`/api/affordable-heatmap`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

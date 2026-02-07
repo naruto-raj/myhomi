@@ -48,7 +48,7 @@ export async function getRankedSectors({
         FROM postcode_latest
         WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
           AND price_adj <= $5
-          AND (COALESCE($6::boolean, false) = false OR property_type = $7)
+          AND ($6::boolean = false OR property_type = $7::text)
         GROUP BY sector
         ORDER BY transactions DESC
         LIMIT $8;
@@ -59,8 +59,8 @@ export async function getRankedSectors({
         maxLng,
         maxLat,
         maxPriceCap,
-        filterByType,
-        propertyType || null,
+        Boolean(filterByType),
+        propertyType || "ALL",
         Math.min(limit * 5, 2000),
       ]
     );
@@ -79,17 +79,32 @@ export async function getRankedSectors({
           AVG(longitude) AS longitude
         FROM postcode_latest
         WHERE price_adj <= $1
-          AND (COALESCE($2::boolean, false) = false OR property_type = $3)
+          AND ($2::boolean = false OR property_type = $3::text)
         GROUP BY sector
         ORDER BY transactions DESC
         LIMIT $4;
       `,
-      [maxPriceCap, filterByType, propertyType || null, Math.min(limit * 5, 5000)]
+      [maxPriceCap, Boolean(filterByType), propertyType || "ALL", Math.min(limit * 5, 5000)]
     );
     rows = result.rows;
   }
 
-  if (!rows.length) return { rows: [], meta: null };
+  if (!rows.length) {
+    return {
+      rows: [],
+      meta: {
+        price_year: null,
+        inflation_base_year: null,
+        inflation_latest_year: null,
+        inflation_base_index: null,
+        inflation_latest_index: null,
+        inflation_factor: null,
+        affordability_cap: maxPriceCap,
+        property_type: propertyType || "ALL",
+        type_ranges: [],
+      },
+    };
+  }
 
   const densities = rows.map((row) => Number(row.transactions || 0));
   const minDensity = Math.min(...densities);

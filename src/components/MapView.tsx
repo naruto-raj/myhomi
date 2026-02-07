@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 import { Protocol } from "pmtiles";
-import type { PricePaidPoint, SectorStat } from "../api/client";
+import type { AffordableHeatmapPoint, PricePaidPoint, SectorStat } from "../api/client";
 import { fetchNearestAffordablePostcode, fetchNearestPostcode } from "../api/client";
 
 type Props = {
   pricePaidPoints: PricePaidPoint[];
   sectors: SectorStat[];
+  affordableHeatmap: AffordableHeatmapPoint[];
   showHeatmap: boolean;
   showCentroids: boolean;
   showBestFit: boolean;
@@ -28,6 +29,7 @@ const MAP_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || "/tiles/style.json";
 export default function MapView({
   pricePaidPoints,
   sectors,
+  affordableHeatmap,
   showHeatmap,
   showCentroids,
   showBestFit,
@@ -65,6 +67,34 @@ export default function MapView({
     }),
     [pricePaidPoints]
   );
+  const affordablePoints = useMemo(() => {
+    const features = affordableHeatmap.flatMap((point, idx) => {
+        const lng = Number(point.longitude);
+        const lat = Number(point.latitude);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return [];
+        const weightRaw = Number(point.weight ?? 1);
+        const countRaw = Number(point.count ?? 1);
+        return [
+          {
+            type: "Feature",
+            id: `affordable-${idx}`,
+            properties: {
+              weight: Number.isFinite(weightRaw) ? weightRaw : 1,
+              count: Number.isFinite(countRaw) ? countRaw : 1,
+            },
+            geometry: {
+              type: "Point",
+              coordinates: [lng, lat],
+            },
+          } as const,
+        ];
+      });
+
+    return {
+      type: "FeatureCollection",
+      features,
+    };
+  }, [affordableHeatmap]);
   const sectorPoints = useMemo(() => {
     const rawScores = sectors.map((sector) => Number(sector.transactions || 0));
 
@@ -276,6 +306,10 @@ export default function MapView({
         type: "geojson",
         data: sectorPoints,
       });
+      map.addSource("affordable", {
+        type: "geojson",
+        data: affordablePoints,
+      });
 
       map.addLayer({
         id: "price-paid-heat",
@@ -309,7 +343,7 @@ export default function MapView({
       map.addLayer({
         id: "best-fit-heat",
         type: "heatmap",
-        source: "sectors",
+        source: "affordable",
         layout: {
           visibility: showBestFit ? "visible" : "none",
         },
@@ -317,28 +351,50 @@ export default function MapView({
           "heatmap-weight": [
             "interpolate",
             ["linear"],
-            ["get", "affordability_score"],
+            ["coalesce", ["get", "weight"], 1],
             0,
-            0,
+            0.15,
             1,
             1,
           ],
-          "heatmap-intensity": 1.2,
-          "heatmap-radius": 26,
-          "heatmap-opacity": 0.75,
+          "heatmap-intensity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5,
+            0.6,
+            9,
+            1.2,
+            12,
+            1.6,
+          ],
+          "heatmap-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5,
+            20,
+            9,
+            28,
+            12,
+            40,
+          ],
+          "heatmap-opacity": 0.85,
           "heatmap-color": [
             "interpolate",
             ["linear"],
             ["heatmap-density"],
             0,
             "rgba(15,23,42,0)",
-            0.25,
-            "#0ea5e9",
-            0.5,
+            0.2,
+            "#38bdf8",
+            0.4,
             "#22c55e",
-            0.7,
+            0.6,
             "#f59e0b",
-            0.9,
+            0.8,
+            "#f97316",
+            1,
             "#ef4444",
           ],
         },
@@ -435,15 +491,7 @@ export default function MapView({
         showNearestAt(event.lngLat.lng, event.lngLat.lat).catch(() => {});
       });
 
-      if (onViewportChangeRef.current) {
-        const bounds = map.getBounds();
-        onViewportChangeRef.current(
-          [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
-          map.getZoom()
-        );
-      }
-
-      map.on("moveend", () => {
+      const emitViewport = () => {
         if (!onViewportChangeRef.current) return;
         const bounds = map.getBounds();
         const bbox = [
@@ -453,7 +501,13 @@ export default function MapView({
           bounds.getNorth(),
         ];
         onViewportChangeRef.current(bbox, map.getZoom());
-      });
+      };
+
+      emitViewport();
+
+      map.on("moveend", emitViewport);
+      map.on("zoomend", emitViewport);
+      map.on("idle", emitViewport);
     });
 
     return () => {
@@ -470,7 +524,9 @@ export default function MapView({
     priceSource.setData(pricePoints);
     const sectorSource = map.getSource("sectors") as maplibregl.GeoJSONSource;
     sectorSource.setData(sectorPoints);
-  }, [pricePoints, sectorPoints]);
+    const affordableSource = map.getSource("affordable") as maplibregl.GeoJSONSource;
+    affordableSource.setData(affordablePoints);
+  }, [pricePoints, sectorPoints, affordablePoints]);
 
   useEffect(() => {
     const map = mapRef.current;

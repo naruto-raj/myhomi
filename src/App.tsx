@@ -3,10 +3,12 @@ import {
   fetchPostcodeLocation,
   fetchPricePaidByPostcode,
   fetchPricePaidViewport,
+  fetchAffordableHeatmap,
   fetchSectorRankings,
   PricePaidPoint,
   SectorStat,
   PropertyTypeRange,
+  AffordableHeatmapPoint,
 } from "./api/client";
 import MapView from "./components/MapView";
 
@@ -49,6 +51,7 @@ export default function App() {
     type_ranges?: PropertyTypeRange[];
   } | null>(null);
   const [typeRanges, setTypeRanges] = useState<PropertyTypeRange[]>([]);
+  const [affordableHeatmap, setAffordableHeatmap] = useState<AffordableHeatmapPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [viewportLoading, setViewportLoading] = useState(false);
   const [currentZoom, setCurrentZoom] = useState<number | null>(null);
@@ -126,23 +129,30 @@ export default function App() {
 
     setViewportLoading(true);
     setSectors([]);
-    const pricePromise = useViewport ? fetchPricePaidViewport(bbox, 2000) : Promise.resolve({ rows: [] });
-    Promise.all([pricePromise, fetchSectorRankings(payload)])
-      .then(([priceData, rankedData]) => {
+    const pricePromise = useViewport ? fetchPricePaidViewport(bbox, 5000) : Promise.resolve({ rows: [] });
+    const heatmapPromise = useViewport
+      ? fetchAffordableHeatmap(payload).catch(() => ({ mode: "grid", rows: [] }))
+      : Promise.resolve({ mode: "grid", rows: [] });
+
+    Promise.all([pricePromise, fetchSectorRankings(payload), heatmapPromise])
+      .then(([priceData, rankedData, heatmapData]) => {
         if (requestId !== requestIdRef.current) return;
         setPricePaidPoints(priceData.rows);
         setSectors(rankedData.rows);
         setRankMeta(rankedData.meta ?? null);
         setTypeRanges(rankedData.meta?.type_ranges ?? []);
+        setAffordableHeatmap(heatmapData.rows ?? []);
       })
       .catch(() => {
         if (requestId !== requestIdRef.current) return;
+        lastRequestKeyRef.current = null;
         if (!useViewport) {
           setPricePaidPoints([]);
         }
         setSectors([]);
         setRankMeta(null);
         setTypeRanges([]);
+        setAffordableHeatmap([]);
       })
       .finally(() => {
         if (requestId === requestIdRef.current) {
@@ -154,32 +164,6 @@ export default function App() {
   const handleViewportChange = (bbox: number[], zoom: number) => {
     setCurrentZoom(zoom);
     if (bboxEquals(lastBboxRef.current, bbox) && lastZoomRef.current === zoom) return;
-    const [minLng, minLat, maxLng, maxLat] = bbox;
-    const width = Math.abs(maxLng - minLng);
-    const height = Math.abs(maxLat - minLat);
-    const centerLng = minLng + width / 2;
-    const centerLat = minLat + height / 2;
-
-    const last = lastBboxRef.current;
-    const lastZoom = lastZoomRef.current;
-    const zoomBucket = zoom >= zoomThreshold ? "viewport" : "nationwide";
-    const lastBucket = lastZoom !== null && lastZoom >= zoomThreshold ? "viewport" : "nationwide";
-    if (last) {
-      const [lMinLng, lMinLat, lMaxLng, lMaxLat] = last;
-      const lWidth = Math.abs(lMaxLng - lMinLng);
-      const lHeight = Math.abs(lMaxLat - lMinLat);
-      const lCenterLng = lMinLng + lWidth / 2;
-      const lCenterLat = lMinLat + lHeight / 2;
-
-      const centerShift = Math.hypot(centerLng - lCenterLng, centerLat - lCenterLat);
-      const minShift = Math.max(lWidth, lHeight) * 0.12;
-      const zoomChanged = lastZoom !== null && Math.abs(zoom - lastZoom) >= 0.25;
-      const scaleChanged = lastZoom !== null && lWidth > 0 ? Math.abs(width - lWidth) / lWidth >= 0.15 : false;
-      const bucketChanged = lastZoom !== null && zoomBucket !== lastBucket;
-      if (centerShift < minShift && !zoomChanged && !scaleChanged && !bucketChanged) {
-        return;
-      }
-    }
 
     lastBboxRef.current = bbox;
     lastZoomRef.current = zoom;
@@ -611,6 +595,7 @@ export default function App() {
           <MapView
             pricePaidPoints={pricePaidPoints}
             sectors={scoredSectors}
+            affordableHeatmap={affordableHeatmap}
             showHeatmap={showHeatmap}
             showCentroids={showCentroids}
             showBestFit={showBestFit}
