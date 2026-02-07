@@ -220,11 +220,35 @@ export default function MapView({
         popup.remove();
       });
 
+      let dragStart: { x: number; y: number } | null = null;
+      let dragged = false;
+
+      map.on("mousedown", (event) => {
+        dragStart = { x: event.point.x, y: event.point.y };
+        dragged = false;
+      });
+
+      map.on("mousemove", (event) => {
+        if (!dragStart) return;
+        const dx = event.point.x - dragStart.x;
+        const dy = event.point.y - dragStart.y;
+        if (Math.hypot(dx, dy) > 6) {
+          dragged = true;
+        }
+      });
+
+      map.on("mouseup", () => {
+        dragStart = null;
+      });
+
       map.on("click", async (event) => {
         if (!event.lngLat) return;
+        if (dragged) return;
         try {
           const result = await fetchNearestPostcode(event.lngLat.lat, event.lngLat.lng);
           const row = result.row;
+          const targetLat = row?.latitude ?? event.lngLat.lat;
+          const targetLng = row?.longitude ?? event.lngLat.lng;
           const rawDate = row?.date_of_transfer ? String(row.date_of_transfer) : "";
           const parsedDate = rawDate ? new Date(rawDate) : null;
           const date =
@@ -244,25 +268,44 @@ export default function MapView({
           const arrow = pct === null ? "" : pct > 0 ? "▲" : pct < 0 ? "▼" : "•";
           const color = pct === null ? "#0f172a" : pct > 0 ? "#16a34a" : pct < 0 ? "#dc2626" : "#64748b";
 
+          map.flyTo({
+            center: [targetLng, targetLat],
+            zoom: Math.max(map.getZoom(), 13),
+            speed: 1.2,
+          });
+
           const inflationLine =
             adjusted !== null
-              ? `<div>Adj. ${result.meta?.inflation_latest_year ?? ""}: £${Number(adjusted).toLocaleString()}</div>`
-              : `<div style="color:#94a3b8">Adj. price unavailable</div>`;
+              ? `<div style="color:#0f172a;">£${Number(adjusted).toLocaleString()}</div>`
+              : `<div style="color:#94a3b8">Unavailable</div>`;
+
+          const pctBadge =
+            pct !== null
+              ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;background:${color}1A;color:${color};font-weight:600;">${arrow} ${pctText}</span>`
+              : `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#e2e8f0;color:#64748b;font-weight:600;">No change</span>`;
 
           const html = `
-            <div style="font-size:12px">
-              <div style="font-weight:600">${row?.postcode ?? "Nearest sale"}</div>
-              <div>Latest sale: ${date}${year ? ` (${year})` : ""}</div>
-              <div>Price: £${price ? Number(price).toLocaleString() : "—"}</div>
-              ${inflationLine}
-              ${
-                pct !== null
-                  ? `<div style="color:${color}; font-weight:600;">${arrow} ${pctText}</div>`
-                  : ""
-              }
+            <div style="font-family:ui-sans-serif,system-ui,-apple-system; min-width:200px; border-radius:12px; background:#ffffff; padding:12px 14px; box-shadow:0 10px 30px rgba(15,23,42,0.15); border:1px solid #e2e8f0;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div style="font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#64748b;">Nearest Sale</div>
+                ${pctBadge}
+              </div>
+              <div style="margin-top:6px; font-size:16px; font-weight:700; color:#0f172a;">${row?.postcode ?? "Nearest sale"}</div>
+              <div style="margin-top:2px; font-size:12px; color:#64748b;">${date}${year ? ` (${year})` : ""}</div>
+
+              <div style="margin-top:10px; display:grid; grid-template-columns:1fr; gap:6px;">
+                <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                  <span>Last price</span>
+                  <span style="color:#0f172a;font-weight:600;">£${price ? Number(price).toLocaleString() : "—"}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                  <span>Adj. ${result.meta?.inflation_latest_year ?? ""}</span>
+                  ${inflationLine}
+                </div>
+              </div>
             </div>
           `;
-          clickPopup.setLngLat(event.lngLat).setHTML(html).addTo(map);
+          clickPopup.setLngLat([targetLng, targetLat]).setHTML(html).addTo(map);
         } catch {
           // ignore
         }
