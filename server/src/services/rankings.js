@@ -13,55 +13,9 @@ export async function getRankedSectors({
   affordability,
   filters,
   priorities,
+  propertyType,
   limit = 50,
 }) {
-  let rows = [];
-  if (scope === "viewport") {
-    const [minLng, minLat, maxLng, maxLat] = bbox;
-    const result = await pool.query(
-      `
-        SELECT
-          sector,
-          median_price,
-          avg_price,
-          median_price_adj,
-          avg_price_adj,
-          transactions,
-          latitude,
-          longitude,
-          updated_at
-        FROM sector_centroids
-        WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
-        ORDER BY transactions DESC
-        LIMIT $5;
-      `,
-      [minLng, minLat, maxLng, maxLat, Math.min(limit * 5, 2000)]
-    );
-    rows = result.rows;
-  } else {
-    const result = await pool.query(
-      `
-        SELECT sector, median_price, avg_price, median_price_adj, avg_price_adj, transactions, latitude, longitude, updated_at
-        FROM sector_stats
-        ORDER BY transactions DESC
-        LIMIT $1;
-      `,
-      [Math.min(limit * 5, 5000)]
-    );
-    rows = result.rows;
-  }
-
-  if (!rows.length) return { rows: [], meta: null };
-
-  const prices = rows.map((row) => Number(row.median_price_adj ?? row.median_price ?? 0));
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-
-  const weightMap = {};
-  priorities.forEach((key, idx) => {
-    weightMap[key] = priorities.length - idx;
-  });
-
   const maxAffordable = (() => {
     const monthlyRate = affordability.mortgageRate / 100 / 12;
     const n = affordability.termYears * 12;
@@ -74,7 +28,111 @@ export async function getRankedSectors({
     return Math.max(loan, 0) + affordability.deposit;
   })();
 
-  const maxPriceCap = maxAffordable * 1.05;
+  const maxPriceCap = Math.floor(maxAffordable * 1.05);
+
+  const filterByType = propertyType && propertyType !== "ALL";
+  let rows = [];
+  if (scope === "viewport") {
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    const result = await pool.query(
+      `
+        SELECT
+          sector,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY price) AS median_price,
+          AVG(price)::int AS avg_price,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY price_adj) AS median_price_adj,
+          AVG(price_adj)::int AS avg_price_adj,
+          COUNT(*)::int AS transactions,
+          AVG(latitude) AS latitude,
+          AVG(longitude) AS longitude
+        FROM postcode_latest
+        WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+          AND price_adj <= $5
+          AND (COALESCE($6::boolean, false) = false OR property_type = $7)
+        GROUP BY sector
+        ORDER BY transactions DESC
+        LIMIT $8;
+      `,
+      [
+        minLng,
+        minLat,
+        maxLng,
+        maxLat,
+        maxPriceCap,
+        filterByType,
+        propertyType || null,
+        Math.min(limit * 5, 2000),
+      ]
+    );
+    rows = result.rows;
+  } else {
+    const result = await pool.query(
+      `
+        SELECT
+          sector,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY price) AS median_price,
+          AVG(price)::int AS avg_price,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY price_adj) AS median_price_adj,
+          AVG(price_adj)::int AS avg_price_adj,
+          COUNT(*)::int AS transactions,
+          AVG(latitude) AS latitude,
+          AVG(longitude) AS longitude
+        FROM postcode_latest
+        WHERE price_adj <= $1
+          AND (COALESCE($2::boolean, false) = false OR property_type = $3)
+        GROUP BY sector
+        ORDER BY transactions DESC
+        LIMIT $4;
+      `,
+      [maxPriceCap, filterByType, propertyType || null, Math.min(limit * 5, 5000)]
+    );
+    rows = result.rows;
+  }
+
+  if (!rows.length) return { rows: [], meta: null };
+
+  const densities = rows.map((row) => Number(row.transactions || 0));
+  const minDensity = Math.min(...densities);
+  const maxDensity = Math.max(...densities);
+
+  let typeRanges = [];
+  if (scope === "viewport") {
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    const result = await pool.query(
+      `
+        SELECT
+          property_type,
+          MIN(price_adj)::int AS min_price_adj,
+          MAX(price_adj)::int AS max_price_adj,
+          COUNT(*)::int AS count
+        FROM postcode_latest
+        WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+          AND price_adj <= $5
+          AND property_type IS NOT NULL
+        GROUP BY property_type
+        ORDER BY property_type;
+      `,
+      [minLng, minLat, maxLng, maxLat, maxPriceCap]
+    );
+    typeRanges = result.rows;
+  } else {
+    const result = await pool.query(
+      `
+        SELECT
+          property_type,
+          MIN(price_adj)::int AS min_price_adj,
+          MAX(price_adj)::int AS max_price_adj,
+          COUNT(*)::int AS count
+        FROM postcode_latest
+        WHERE price_adj <= $1
+          AND property_type IS NOT NULL
+        GROUP BY property_type
+        ORDER BY property_type;
+      `,
+      [maxPriceCap]
+    );
+    typeRanges = result.rows;
+  }
 
   const meta = await getDataMeta();
   const priceYear = meta.price_paid_max_year ? Number(meta.price_paid_max_year) : null;
@@ -82,16 +140,8 @@ export async function getRankedSectors({
 
   const adjustedRows = rows
     .map((row) => {
-      const priceValue = Number(row.median_price_adj ?? row.median_price ?? 0);
-      const priceScore = normalize(priceValue, minPrice, maxPrice);
-      const commuteScore = 0.5;
-      const schoolsScore = 0.5;
-      const crimeScore = 0.5;
-      const score =
-        priceScore * (weightMap.price || 0) +
-        commuteScore * (weightMap.commute || 0) +
-        schoolsScore * (weightMap.schools || 0) +
-        (1 - crimeScore) * (weightMap.crime || 0);
+      const densityScore = normalize(Number(row.transactions || 0), minDensity, maxDensity);
+      const score = densityScore;
 
       const inflation_adjusted_price =
         row.median_price_adj ?? (inflation?.factor && row.median_price
@@ -99,7 +149,6 @@ export async function getRankedSectors({
           : null);
       return { ...row, score, inflation_adjusted_price };
     })
-    .filter((row) => Number(row.median_price_adj ?? row.median_price ?? 0) <= maxPriceCap)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, limit);
 
@@ -113,6 +162,9 @@ export async function getRankedSectors({
           inflation_base_index: inflation.baseIndex,
           inflation_latest_index: inflation.latestIndex,
           inflation_factor: inflation.factor,
+          affordability_cap: maxPriceCap,
+          property_type: propertyType || "ALL",
+          type_ranges: typeRanges,
         }
       : {
           price_year: priceYear,
@@ -121,6 +173,9 @@ export async function getRankedSectors({
           inflation_base_index: null,
           inflation_latest_index: null,
           inflation_factor: null,
+          affordability_cap: maxPriceCap,
+          property_type: propertyType || "ALL",
+          type_ranges: typeRanges,
         },
   };
 }

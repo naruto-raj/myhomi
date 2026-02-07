@@ -40,6 +40,13 @@ export type SectorStat = {
   inflation_adjusted_price?: number | null;
 };
 
+export type PropertyTypeRange = {
+  property_type: string;
+  min_price_adj: number;
+  max_price_adj: number;
+  count: number;
+};
+
 async function json<T>(input: RequestInfo, init?: RequestInit) {
   const res = await fetch(input, init);
   if (!res.ok) {
@@ -109,7 +116,8 @@ export function fetchNearestPostcode(lat: number, lng: number) {
 export function fetchNearestAffordablePostcode(
   lat: number,
   lng: number,
-  affordability: { monthlyBudget: number; deposit: number; mortgageRate: number; termYears: number }
+  affordability: { monthlyBudget: number; deposit: number; mortgageRate: number; termYears: number },
+  propertyType?: string
 ) {
   const params = new URLSearchParams({
     lat: String(lat),
@@ -119,6 +127,9 @@ export function fetchNearestAffordablePostcode(
     mortgageRate: String(affordability.mortgageRate ?? 0),
     termYears: String(affordability.termYears ?? 0),
   });
+  if (propertyType && propertyType !== "ALL") {
+    params.set("propertyType", propertyType);
+  }
   return json<{
     row: PostcodeLatest & {
       latitude?: number;
@@ -155,6 +166,7 @@ export function fetchSectorRankings(payload: {
     maxCrime: number;
   };
   priorities: string[];
+  propertyType?: string;
   limit?: number;
 }) {
   return json<{
@@ -165,6 +177,7 @@ export function fetchSectorRankings(payload: {
       inflation_base_index?: number | null;
       inflation_latest_index?: number | null;
       inflation_factor?: number | null;
+      type_ranges?: PropertyTypeRange[];
     } | null;
   }>(`/api/sector-rankings`, {
     method: "POST",

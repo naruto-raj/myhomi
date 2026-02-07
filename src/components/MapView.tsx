@@ -17,6 +17,7 @@ type Props = {
     termYears: number;
   };
   maxAffordable?: number;
+  propertyType?: string;
   selectedSector?: SectorStat | null;
   onViewportChange?: (bbox: number[], zoom: number) => void;
   focusPoint?: { latitude: number; longitude: number } | null;
@@ -32,6 +33,7 @@ export default function MapView({
   showBestFit,
   affordability,
   maxAffordable,
+  propertyType,
   selectedSector,
   onViewportChange,
   focusPoint,
@@ -41,6 +43,7 @@ export default function MapView({
   const showCentroidsRef = useRef(showCentroids);
   const showBestFitRef = useRef(showBestFit);
   const affordabilityRef = useRef<Props["affordability"]>(affordability);
+  const propertyTypeRef = useRef<string | undefined>(propertyType);
   const onViewportChangeRef = useRef<Props["onViewportChange"]>(onViewportChange);
   const clickPopupRef = useRef<maplibregl.Popup | null>(null);
 
@@ -63,14 +66,7 @@ export default function MapView({
     [pricePaidPoints]
   );
   const sectorPoints = useMemo(() => {
-    const cap = maxAffordable ? maxAffordable * 1.05 : null;
-    const rawScores = sectors.map((sector) => {
-      const priceAdj =
-        sector.median_price_adj ?? sector.inflation_adjusted_price ?? sector.median_price;
-      const fallbackScore = sector.score ?? 0;
-      if (!cap || !priceAdj) return fallbackScore;
-      return Math.max(0, Math.min(1, 1 - priceAdj / cap));
-    });
+    const rawScores = sectors.map((sector) => Number(sector.transactions || 0));
 
     const minScore = rawScores.length ? Math.min(...rawScores) : 0;
     const maxScore = rawScores.length ? Math.max(...rawScores) : 1;
@@ -82,7 +78,7 @@ export default function MapView({
         const priceAdj =
           sector.median_price_adj ?? sector.inflation_adjusted_price ?? sector.median_price;
         const raw = rawScores[idx] ?? 0;
-        const normalized = range > 0.0001 ? (raw - minScore) / range : raw;
+        const normalized = range > 0.0001 ? (raw - minScore) / range : 0;
         return {
           type: "Feature",
           id: sector.sector,
@@ -101,7 +97,7 @@ export default function MapView({
         };
       }),
     };
-  }, [sectors, maxAffordable]);
+  }, [sectors]);
 
   useEffect(() => {
     showCentroidsRef.current = showCentroids;
@@ -114,6 +110,10 @@ export default function MapView({
   useEffect(() => {
     affordabilityRef.current = affordability;
   }, [affordability]);
+
+  useEffect(() => {
+    propertyTypeRef.current = propertyType;
+  }, [propertyType]);
 
   useEffect(() => {
     onViewportChangeRef.current = onViewportChange;
@@ -136,9 +136,10 @@ export default function MapView({
       let result: Awaited<ReturnType<typeof fetchNearestPostcode>> | null = null;
       let label = options?.label || "Nearest Sale";
       const affordabilityValue = affordabilityRef.current;
+      const propertyTypeValue = propertyTypeRef.current;
       if (showBestFitRef.current && affordabilityValue) {
         try {
-          result = await fetchNearestAffordablePostcode(lat, lng, affordabilityValue);
+          result = await fetchNearestAffordablePostcode(lat, lng, affordabilityValue, propertyTypeValue);
           label = options?.label || "Nearest Affordable Sale";
         } catch {
           result = await fetchNearestPostcode(lat, lng);
@@ -174,6 +175,19 @@ export default function MapView({
       const latestYear = result.meta?.inflation_latest_year ?? null;
       const baseIndex = result.meta?.inflation_base_index ?? null;
       const latestIndex = result.meta?.inflation_latest_index ?? null;
+      const propertyTypeCode = row?.property_type ?? null;
+      const propertyTypeLabel =
+        propertyTypeCode === "D"
+          ? "Detached"
+          : propertyTypeCode === "S"
+            ? "Semi-detached"
+            : propertyTypeCode === "T"
+              ? "Terraced"
+              : propertyTypeCode === "F"
+                ? "Flat / Maisonette"
+                : propertyTypeCode === "O"
+                  ? "Other"
+                  : "Unknown";
 
       map.flyTo({
         center: [targetLng, targetLat],
@@ -216,6 +230,7 @@ export default function MapView({
           </div>
           <div style="margin-top:6px; font-size:16px; font-weight:700; color:#0f172a;">${row?.postcode ?? "Nearest sale"}</div>
           <div style="margin-top:2px; font-size:12px; color:#64748b;">${date}${year ? ` (${year})` : ""}</div>
+          <div style="margin-top:2px; font-size:12px; color:#94a3b8;">${propertyTypeLabel}</div>
 
           <div style="margin-top:10px; display:grid; grid-template-columns:1fr; gap:6px;">
             <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
@@ -383,7 +398,7 @@ export default function MapView({
             <div style="font-weight:600">${sector}</div>
             <div>Median price: £${median.toLocaleString()}</div>
             ${medianAdj ? `<div>Adj. price: £${medianAdj.toLocaleString()}</div>` : ""}
-            <div>Sales: ${transactions}</div>
+            <div>Affordable latest sales: ${transactions}</div>
           </div>
         `;
         popup.setLngLat(event.lngLat).setHTML(html).addTo(map);

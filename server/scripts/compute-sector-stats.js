@@ -187,6 +187,10 @@ async function compute() {
         INSERT INTO postcode_latest (
           postcode_norm,
           postcode,
+          sector,
+          property_type,
+          old_new,
+          duration,
           latitude,
           longitude,
           geom,
@@ -208,7 +212,10 @@ async function compute() {
             pp.postcode,
             pp.transaction_id,
             pp.price,
-            pp.date_of_transfer
+            pp.date_of_transfer,
+            pp.property_type,
+            pp.old_new,
+            pp.duration
           FROM price_paid pp
           WHERE pp.postcode_norm IS NOT NULL
           ORDER BY pp.postcode_norm, pp.date_of_transfer DESC
@@ -216,6 +223,11 @@ async function compute() {
         SELECT
           pc.postcode_norm,
           pc.postcode,
+          regexp_replace(pc.postcode, '\\s+.*', '') || ' ' ||
+            left(regexp_replace(pc.postcode, '^\\S+\\s+', ''), 1) AS sector,
+          ls.property_type,
+          ls.old_new,
+          ls.duration,
           pc.latitude,
           pc.longitude,
           ST_SetSRID(ST_MakePoint(pc.longitude, pc.latitude), 4326) AS geom,

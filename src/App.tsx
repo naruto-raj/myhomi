@@ -6,6 +6,7 @@ import {
   fetchSectorRankings,
   PricePaidPoint,
   SectorStat,
+  PropertyTypeRange,
 } from "./api/client";
 import MapView from "./components/MapView";
 
@@ -45,7 +46,9 @@ export default function App() {
     inflation_base_index?: number | null;
     inflation_latest_index?: number | null;
     inflation_factor?: number | null;
+    type_ranges?: PropertyTypeRange[];
   } | null>(null);
+  const [typeRanges, setTypeRanges] = useState<PropertyTypeRange[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [viewportLoading, setViewportLoading] = useState(false);
   const [currentZoom, setCurrentZoom] = useState<number | null>(null);
@@ -59,6 +62,7 @@ export default function App() {
     minSchools: 60,
     maxCrime: 60,
   });
+  const [propertyType, setPropertyType] = useState("ALL");
   const [affordability, setAffordability] = useState({
     monthlyBudget: 2200,
     deposit: 60000,
@@ -85,6 +89,14 @@ export default function App() {
     { value: "crime", label: "Crime (lower better)" },
   ];
 
+  const propertyTypeLabels: Record<string, string> = {
+    D: "Detached",
+    S: "Semi-detached",
+    T: "Terraced",
+    F: "Flat / Maisonette",
+    O: "Other",
+  };
+
   const maxAffordable = useMemo(
     () => computeMaxAffordable(affordability),
     [affordability]
@@ -102,6 +114,7 @@ export default function App() {
       affordability,
       filters,
       priorities: priorityOrder,
+      propertyType,
       limit: 50,
     };
     const requestKey = JSON.stringify(payload);
@@ -120,6 +133,7 @@ export default function App() {
         setPricePaidPoints(priceData.rows);
         setSectors(rankedData.rows);
         setRankMeta(rankedData.meta ?? null);
+        setTypeRanges(rankedData.meta?.type_ranges ?? []);
       })
       .catch(() => {
         if (requestId !== requestIdRef.current) return;
@@ -128,6 +142,7 @@ export default function App() {
         }
         setSectors([]);
         setRankMeta(null);
+        setTypeRanges([]);
       })
       .finally(() => {
         if (requestId === requestIdRef.current) {
@@ -190,7 +205,7 @@ export default function App() {
     viewportTimer.current = window.setTimeout(() => {
       fetchRankingsForBbox(lastBboxRef.current as number[], lastZoomRef.current);
     }, 350);
-  }, [affordability, filters, priorityOrder]);
+  }, [affordability, filters, priorityOrder, propertyType]);
 
   const scoredSectors = useMemo(() => sectors, [sectors]);
 
@@ -240,11 +255,12 @@ export default function App() {
         affordability,
         filters,
         priorities: priorityOrder,
+        propertyType,
       },
       null,
       2
     );
-  }, [affordability, filters, priorityOrder, currentZoom]);
+  }, [affordability, filters, priorityOrder, propertyType, currentZoom]);
 
   return (
     <div className="min-h-screen bg-stone-100 text-stone-900">
@@ -264,7 +280,7 @@ export default function App() {
         <aside className="border-b border-stone-200 bg-white p-6 lg:border-b-0 lg:border-r">
           <div className="mb-6">
             <p className="text-xs uppercase tracking-[0.2em] text-stone-500">Phase 3</p>
-            <h1 className="text-2xl font-semibold text-stone-900">Price Paid Explorer</h1>
+            <h1 className="text-2xl font-semibold text-stone-900">myfirsthomie</h1>
             <p className="mt-2 text-sm text-stone-600">
               Search by postcode and explore price paid density with a live heatmap.
             </p>
@@ -327,6 +343,21 @@ export default function App() {
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
                   Max affordable price: £{Math.round(maxAffordable).toLocaleString()}
                 </div>
+                <div>
+                  <label className="text-xs text-stone-600">Property type</label>
+                  <select
+                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+                    value={propertyType}
+                    onChange={(e) => setPropertyType(e.target.value)}
+                  >
+                    <option value="ALL">All property types</option>
+                    <option value="D">Detached</option>
+                    <option value="S">Semi-detached</option>
+                    <option value="T">Terraced</option>
+                    <option value="F">Flat / Maisonette</option>
+                    <option value="O">Other</option>
+                  </select>
+                </div>
                 <div className="rounded-md border border-stone-200 bg-white p-2">
                   <label className="text-xs text-stone-600">Postcode (optional)</label>
                   <form onSubmit={handlePostcodeSearch} className="mt-1 flex gap-2">
@@ -353,27 +384,26 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Priority Order</p>
-              <p className="mt-1 text-xs text-stone-500">Data not loaded yet.</p>
-              <div className="mt-3 space-y-2">
-                {priorityOrder.map((value, idx) => {
-                  const label = priorityOptions.find((opt) => opt.value === value)?.label ?? value;
-                  return (
-                    <div
-                      key={`priority-${value}`}
-                      className="flex items-center gap-2 rounded-md border border-stone-200 bg-white px-2 py-2 text-xs text-stone-400"
-                    >
-                      <span className="rounded border border-stone-200 bg-stone-100 px-2 py-1 text-[10px] text-stone-400">
-                        ⋮⋮
-                      </span>
-                      <span className="font-semibold">
-                        #{idx + 1} · {label}
-                      </span>
-                      <span className="ml-auto text-[10px] text-stone-400">Weight {4 - idx}</span>
-                    </div>
-                  );
-                })}
+            <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Affordable Range (By Type)</p>
+              <p className="mt-1 text-xs text-stone-500">
+                Based on latest sales within your budget for the current zoom.
+              </p>
+              <div className="mt-3 space-y-2 text-xs text-stone-700">
+                {typeRanges.length === 0 && (
+                  <p className="text-xs text-stone-500">No affordable ranges yet for this view.</p>
+                )}
+                {typeRanges.map((range) => (
+                  <div key={range.property_type} className="flex items-center justify-between">
+                    <span className="font-medium">
+                      {propertyTypeLabels[range.property_type] ?? range.property_type}
+                      <span className="ml-2 text-[10px] text-stone-500">({range.count})</span>
+                    </span>
+                    <span className="text-right text-xs text-stone-600">
+                      £{range.min_price_adj.toLocaleString()}–£{range.max_price_adj.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
             <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
@@ -383,57 +413,6 @@ export default function App() {
                   ? "Local view (zoomed): viewport sectors."
                   : "Nationwide view: precomputed sector stats."}
               </p>
-            </div>
-            <div className="rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
-              <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Filters</p>
-              <p className="mt-1 text-xs text-stone-500">Data not loaded yet.</p>
-              <div className="mt-3 space-y-3">
-                <div>
-                  <label className="text-xs text-stone-600">
-                    Max Commute (mins): <span className="font-semibold">{filters.maxCommute}</span>
-                  </label>
-                  <input
-                    className="mt-2 w-full"
-                    type="range"
-                    min={10}
-                    max={180}
-                    step={5}
-                    value={filters.maxCommute}
-                    disabled
-                    onChange={(e) => setFilters({ ...filters, maxCommute: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-stone-600">
-                    Min Schools Score: <span className="font-semibold">{filters.minSchools}</span>
-                  </label>
-                  <input
-                    className="mt-2 w-full"
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={filters.minSchools}
-                    disabled
-                    onChange={(e) => setFilters({ ...filters, minSchools: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-stone-600">
-                    Max Crime Index: <span className="font-semibold">{filters.maxCrime}</span>
-                  </label>
-                  <input
-                    className="mt-2 w-full"
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={filters.maxCrime}
-                    disabled
-                    onChange={(e) => setFilters({ ...filters, maxCrime: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
             </div>
             <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
               <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Debug Layers</p>
@@ -501,7 +480,7 @@ export default function App() {
           <div className="mt-6 rounded-md border border-stone-200 bg-white p-4 text-sm">
             <p className="font-semibold text-stone-900">Best Postcode Sectors</p>
             <p className="mt-1 text-xs text-stone-600">
-              Ranked by inflation-adjusted price (CPIH). Commute, schools, and crime will plug in once datasets are ingested.
+              Ranked by latest affordable sale density (CPIH-adjusted). Commute, schools, and crime will plug in once datasets are ingested.
             </p>
             {rankMeta?.price_year && rankMeta?.inflation_latest_year && (
               <p className="mt-2 text-[10px] text-stone-500">
@@ -521,7 +500,12 @@ export default function App() {
                   onClick={() => setSelectedSector({ ...sector })}
                   className="flex w-full items-center justify-between rounded-md border border-transparent px-2 py-1 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60"
                 >
-                  <span className="font-medium">{sector.sector}</span>
+                  <span>
+                    <span className="font-medium">{sector.sector}</span>
+                    <span className="block text-[10px] text-stone-500">
+                      Affordable latest sales: {sector.transactions ?? 0}
+                    </span>
+                  </span>
                   <span className="text-right">
                     £{Math.round(sector.median_price).toLocaleString()}
                     {sector.median_price_adj ?? sector.inflation_adjusted_price ? (
@@ -545,6 +529,82 @@ export default function App() {
               <p className="mt-2 text-xs text-stone-600">{pricePaidPoints.length} records loaded.</p>
             )}
           </div>
+
+          <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
+            <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Priority Order</p>
+            <p className="mt-1 text-xs text-stone-500">Data not loaded yet.</p>
+            <div className="mt-3 space-y-2">
+              {priorityOrder.map((value, idx) => {
+                const label = priorityOptions.find((opt) => opt.value === value)?.label ?? value;
+                return (
+                  <div
+                    key={`priority-${value}`}
+                    className="flex items-center gap-2 rounded-md border border-stone-200 bg-white px-2 py-2 text-xs text-stone-400"
+                  >
+                    <span className="rounded border border-stone-200 bg-stone-100 px-2 py-1 text-[10px] text-stone-400">
+                      ⋮⋮
+                    </span>
+                    <span className="font-semibold">
+                      #{idx + 1} · {label}
+                    </span>
+                    <span className="ml-auto text-[10px] text-stone-400">Weight {4 - idx}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-md border border-stone-200 bg-stone-50 p-3 opacity-60">
+            <p className="text-xs uppercase tracking-[0.2em] text-stone-600">Filters</p>
+            <p className="mt-1 text-xs text-stone-500">Data not loaded yet.</p>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="text-xs text-stone-600">
+                  Max Commute (mins): <span className="font-semibold">{filters.maxCommute}</span>
+                </label>
+                <input
+                  className="mt-2 w-full"
+                  type="range"
+                  min={10}
+                  max={180}
+                  step={5}
+                  value={filters.maxCommute}
+                  disabled
+                  onChange={(e) => setFilters({ ...filters, maxCommute: Number(e.target.value) })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-stone-600">
+                  Min Schools Score: <span className="font-semibold">{filters.minSchools}</span>
+                </label>
+                <input
+                  className="mt-2 w-full"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={filters.minSchools}
+                  disabled
+                  onChange={(e) => setFilters({ ...filters, minSchools: Number(e.target.value) })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-stone-600">
+                  Max Crime Index: <span className="font-semibold">{filters.maxCrime}</span>
+                </label>
+                <input
+                  className="mt-2 w-full"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={filters.maxCrime}
+                  disabled
+                  onChange={(e) => setFilters({ ...filters, maxCrime: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </div>
         </aside>
 
         <main className="relative">
@@ -556,6 +616,7 @@ export default function App() {
             showBestFit={showBestFit}
             affordability={affordability}
             maxAffordable={maxAffordable}
+            propertyType={propertyType}
             selectedSector={selectedSector}
             onViewportChange={handleViewportChange}
             focusPoint={postcodeLocation}

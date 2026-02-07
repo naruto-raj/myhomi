@@ -213,10 +213,11 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
       mortgageRate: Number(req.query.mortgageRate ?? 0),
       termYears: Number(req.query.termYears ?? 0),
     };
+    const propertyType = typeof req.query.propertyType === "string" ? req.query.propertyType : "ALL";
     const maxAffordable = computeMaxAffordable(affordability);
     const maxAffordableCap = Math.floor(maxAffordable * 1.05);
 
-    const row = await getNearestAffordablePricePaid(lng, lat, maxAffordableCap);
+    const row = await getNearestAffordablePricePaid(lng, lat, maxAffordableCap, propertyType);
     if (!row) {
       return res.status(404).json({ error: "no affordable postcode found" });
     }
@@ -354,6 +355,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       affordability,
       filters,
       priorities,
+      propertyType,
       limit = 20,
     } = req.body || {};
 
@@ -379,21 +381,29 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
     }
 
     const safePriorities = Array.isArray(priorities) ? priorities : ["price", "commute", "schools", "crime"];
+    const numOrZero = (value) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : 0;
+    };
     const safeAffordability = {
-      monthlyBudget: Number(affordability?.monthlyBudget ?? 0),
-      deposit: Number(affordability?.deposit ?? 0),
-      mortgageRate: Number(affordability?.mortgageRate ?? 0),
-      termYears: Number(affordability?.termYears ?? 0),
+      monthlyBudget: numOrZero(affordability?.monthlyBudget),
+      deposit: numOrZero(affordability?.deposit),
+      mortgageRate: numOrZero(affordability?.mortgageRate),
+      termYears: numOrZero(affordability?.termYears),
     };
     const safeFilters = {
-      maxCommute: Number(filters?.maxCommute ?? 120),
-      minSchools: Number(filters?.minSchools ?? 0),
-      maxCrime: Number(filters?.maxCrime ?? 100),
+      maxCommute: numOrZero(filters?.maxCommute ?? 120),
+      minSchools: numOrZero(filters?.minSchools ?? 0),
+      maxCrime: numOrZero(filters?.maxCrime ?? 100),
     };
+    const safePropertyType =
+      typeof propertyType === "string" && propertyType.trim() !== ""
+        ? propertyType.trim().toUpperCase()
+        : "ALL";
 
     const cacheKey = `rank:${derivedScope}:${JSON.stringify(bbox)}:${JSON.stringify(safeAffordability)}:${JSON.stringify(
       safeFilters
-    )}:${JSON.stringify(safePriorities)}:${limit}`;
+    )}:${JSON.stringify(safePriorities)}:${safePropertyType}:${limit}`;
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
 
@@ -403,6 +413,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       affordability: safeAffordability,
       filters: safeFilters,
       priorities: safePriorities,
+      propertyType: safePropertyType,
       limit: Math.min(Number(limit), 100),
     });
 

@@ -102,7 +102,8 @@ export async function getLatestPricePaidNearPoint(longitude, latitude) {
   return rows[0] || null;
 }
 
-export async function getNearestAffordablePricePaid(longitude, latitude, maxPrice) {
+export async function getNearestAffordablePricePaid(longitude, latitude, maxPrice, propertyType) {
+  const filterByType = propertyType && propertyType !== "ALL";
   const { rows } = await pool.query(
     `
       SELECT
@@ -113,13 +114,17 @@ export async function getNearestAffordablePricePaid(longitude, latitude, maxPric
         pl.transaction_id,
         pl.price,
         pl.date_of_transfer,
+        pl.property_type,
+        pl.old_new,
+        pl.duration,
         pl.price_adj
       FROM postcode_latest pl
       WHERE pl.price_adj <= $3
+        AND (COALESCE($4::boolean, false) = false OR pl.property_type = $5)
       ORDER BY pl.geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
       LIMIT 1;
     `,
-    [longitude, latitude, maxPrice]
+    [longitude, latitude, maxPrice, filterByType, propertyType || null]
   );
   return rows[0] || null;
 }
