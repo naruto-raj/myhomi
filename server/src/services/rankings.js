@@ -24,6 +24,8 @@ export async function getRankedSectors({
           sector,
           median_price,
           avg_price,
+          median_price_adj,
+          avg_price_adj,
           transactions,
           latitude,
           longitude,
@@ -39,7 +41,7 @@ export async function getRankedSectors({
   } else {
     const result = await pool.query(
       `
-        SELECT sector, median_price, avg_price, transactions, latitude, longitude, updated_at
+        SELECT sector, median_price, avg_price, median_price_adj, avg_price_adj, transactions, latitude, longitude, updated_at
         FROM sector_stats
         ORDER BY transactions DESC
         LIMIT $1;
@@ -51,7 +53,7 @@ export async function getRankedSectors({
 
   if (!rows.length) return { rows: [], meta: null };
 
-  const prices = rows.map((row) => Number(row.median_price || 0));
+  const prices = rows.map((row) => Number(row.median_price_adj ?? row.median_price ?? 0));
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
 
@@ -80,7 +82,8 @@ export async function getRankedSectors({
 
   const adjustedRows = rows
     .map((row) => {
-      const priceScore = normalize(Number(row.median_price || 0), minPrice, maxPrice);
+      const priceValue = Number(row.median_price_adj ?? row.median_price ?? 0);
+      const priceScore = normalize(priceValue, minPrice, maxPrice);
       const commuteScore = 0.5;
       const schoolsScore = 0.5;
       const crimeScore = 0.5;
@@ -91,12 +94,12 @@ export async function getRankedSectors({
         (1 - crimeScore) * (weightMap.crime || 0);
 
       const inflation_adjusted_price =
-        inflation?.factor && row.median_price
+        row.median_price_adj ?? (inflation?.factor && row.median_price
           ? Math.round(Number(row.median_price) * inflation.factor)
-          : null;
+          : null);
       return { ...row, score, inflation_adjusted_price };
     })
-    .filter((row) => Number(row.median_price || 0) <= maxPriceCap)
+    .filter((row) => Number(row.median_price_adj ?? row.median_price ?? 0) <= maxPriceCap)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, limit);
 
@@ -107,12 +110,16 @@ export async function getRankedSectors({
           price_year: inflation.fromYear,
           inflation_base_year: inflation.baseYear,
           inflation_latest_year: inflation.latestYear,
+          inflation_base_index: inflation.baseIndex,
+          inflation_latest_index: inflation.latestIndex,
           inflation_factor: inflation.factor,
         }
       : {
           price_year: priceYear,
           inflation_base_year: null,
           inflation_latest_year: null,
+          inflation_base_index: null,
+          inflation_latest_index: null,
           inflation_factor: null,
         },
   };

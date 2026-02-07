@@ -8,6 +8,8 @@ export async function getSectorsInViewport(bbox, limit = 500) {
         sector,
         median_price,
         avg_price,
+        median_price_adj,
+        avg_price_adj,
         transactions,
         latitude,
         longitude,

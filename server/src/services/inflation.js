@@ -17,6 +17,12 @@ export function getLatestCpihYear() {
   return Math.max(...years);
 }
 
+export function getCpihIndex(year) {
+  if (!year) return null;
+  const value = cpihAnnual[String(year)];
+  return Number.isFinite(value) ? value : null;
+}
+
 export function getInflationFactor(fromYear) {
   if (!fromYear) return null;
   const latestYear = getLatestCpihYear();
@@ -31,13 +37,15 @@ export function getInflationFactor(fromYear) {
     ? fromYear
     : availableYears.filter((year) => year <= fromYear).pop() ?? availableYears[0];
 
-  const base = cpihAnnual[String(baseYear)];
-  const latest = cpihAnnual[String(latestYear)];
+  const base = getCpihIndex(baseYear);
+  const latest = getCpihIndex(latestYear);
   if (!base || !latest) return null;
   return {
     fromYear,
     baseYear,
     latestYear,
+    baseIndex: base,
+    latestIndex: latest,
     factor: latest / base,
   };
 }

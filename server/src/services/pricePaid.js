@@ -102,6 +102,28 @@ export async function getLatestPricePaidNearPoint(longitude, latitude) {
   return rows[0] || null;
 }
 
+export async function getNearestAffordablePricePaid(longitude, latitude, maxPrice) {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        pl.postcode,
+        pl.postcode_norm,
+        pl.latitude,
+        pl.longitude,
+        pl.transaction_id,
+        pl.price,
+        pl.date_of_transfer,
+        pl.price_adj
+      FROM postcode_latest pl
+      WHERE pl.price_adj <= $3
+      ORDER BY pl.geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
+      LIMIT 1;
+    `,
+    [longitude, latitude, maxPrice]
+  );
+  return rows[0] || null;
+}
+
 export async function getPricePaidSummaryByDistrict(district, limit = 50) {
   const { rows } = await pool.query(
     `

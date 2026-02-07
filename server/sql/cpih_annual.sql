@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS cpih_annual (
+  year INTEGER PRIMARY KEY,
+  index NUMERIC
+);

@@ -42,6 +42,8 @@ export default function App() {
   const [rankMeta, setRankMeta] = useState<{
     price_year?: number | null;
     inflation_latest_year?: number | null;
+    inflation_base_index?: number | null;
+    inflation_latest_index?: number | null;
     inflation_factor?: number | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,7 @@ export default function App() {
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showCentroids, setShowCentroids] = useState(false);
   const [showBestFit, setShowBestFit] = useState(true);
+  const [selectedSector, setSelectedSector] = useState<SectorStat | null>(null);
   const zoomThreshold = Number(import.meta.env.VITE_ZOOM_THRESHOLD || 8);
 
   const viewportTimer = useRef<number | null>(null);
@@ -443,6 +446,9 @@ export default function App() {
                   />
                   Show best-fit heatmap
                 </label>
+                <p className="text-[10px] text-stone-500">
+                  Best-fit heatmap uses CPIH-adjusted affordability.
+                </p>
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -495,27 +501,36 @@ export default function App() {
           <div className="mt-6 rounded-md border border-stone-200 bg-white p-4 text-sm">
             <p className="font-semibold text-stone-900">Best Postcode Sectors</p>
             <p className="mt-1 text-xs text-stone-600">
-              Currently ranked by price paid. Commute, schools, and crime will plug in once datasets are ingested.
+              Ranked by inflation-adjusted price (CPIH). Commute, schools, and crime will plug in once datasets are ingested.
             </p>
             {rankMeta?.price_year && rankMeta?.inflation_latest_year && (
               <p className="mt-2 text-[10px] text-stone-500">
-                Inflation-adjusted to {rankMeta.inflation_latest_year} (base year {rankMeta.price_year}, approx).
+                CPIH (2015=100): {rankMeta.price_year} {rankMeta.inflation_base_index ?? "—"} →{" "}
+                {rankMeta.inflation_latest_year} {rankMeta.inflation_latest_index ?? "—"}
+                {rankMeta.inflation_factor
+                  ? ` (x${rankMeta.inflation_factor.toFixed(3)})`
+                  : ""}
               </p>
             )}
             <div className="mt-3 max-h-56 space-y-2 overflow-auto text-xs text-stone-700">
               {scoredSectors.length === 0 && <p className="text-xs text-stone-500">No sectors loaded yet.</p>}
               {scoredSectors.map((sector) => (
-                <div key={sector.sector} className="flex items-center justify-between">
+                <button
+                  key={sector.sector}
+                  type="button"
+                  onClick={() => setSelectedSector({ ...sector })}
+                  className="flex w-full items-center justify-between rounded-md border border-transparent px-2 py-1 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60"
+                >
                   <span className="font-medium">{sector.sector}</span>
                   <span className="text-right">
                     £{Math.round(sector.median_price).toLocaleString()}
-                    {sector.inflation_adjusted_price ? (
+                    {sector.median_price_adj ?? sector.inflation_adjusted_price ? (
                       <span className="block text-[10px] text-stone-500">
-                        £{Math.round(sector.inflation_adjusted_price).toLocaleString()} (adj.)
+                        £{Math.round(sector.median_price_adj ?? sector.inflation_adjusted_price ?? 0).toLocaleString()} (adj.)
                       </span>
                     ) : null}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -539,6 +554,9 @@ export default function App() {
             showHeatmap={showHeatmap}
             showCentroids={showCentroids}
             showBestFit={showBestFit}
+            affordability={affordability}
+            maxAffordable={maxAffordable}
+            selectedSector={selectedSector}
             onViewportChange={handleViewportChange}
             focusPoint={postcodeLocation}
           />

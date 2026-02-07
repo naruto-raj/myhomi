@@ -31,6 +31,8 @@ export type SectorStat = {
   sector: string;
   median_price: number;
   avg_price: number;
+  median_price_adj?: number | null;
+  avg_price_adj?: number | null;
   transactions: number;
   latitude: number;
   longitude: number;
@@ -75,6 +77,8 @@ export function fetchPostcodeLatest(postcode: string) {
       price_year?: number | null;
       inflation_base_year?: number | null;
       inflation_latest_year?: number | null;
+      inflation_base_index?: number | null;
+      inflation_latest_index?: number | null;
       inflation_factor?: number | null;
       inflation_adjusted_price?: number | null;
     } | null;
@@ -93,11 +97,47 @@ export function fetchNearestPostcode(lat: number, lng: number) {
       price_year?: number | null;
       inflation_base_year?: number | null;
       inflation_latest_year?: number | null;
+      inflation_base_index?: number | null;
+      inflation_latest_index?: number | null;
       inflation_factor?: number | null;
       inflation_adjusted_price?: number | null;
       inflation_percent_change?: number | null;
     } | null;
   }>(`/api/postcode/nearest?${params.toString()}`);
+}
+
+export function fetchNearestAffordablePostcode(
+  lat: number,
+  lng: number,
+  affordability: { monthlyBudget: number; deposit: number; mortgageRate: number; termYears: number }
+) {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+    monthlyBudget: String(affordability.monthlyBudget ?? 0),
+    deposit: String(affordability.deposit ?? 0),
+    mortgageRate: String(affordability.mortgageRate ?? 0),
+    termYears: String(affordability.termYears ?? 0),
+  });
+  return json<{
+    row: PostcodeLatest & {
+      latitude?: number;
+      longitude?: number;
+      postcode_norm?: string;
+      price_adj?: number;
+    };
+    meta?: {
+      price_year?: number | null;
+      inflation_base_year?: number | null;
+      inflation_latest_year?: number | null;
+      inflation_base_index?: number | null;
+      inflation_latest_index?: number | null;
+      inflation_factor?: number | null;
+      inflation_adjusted_price?: number | null;
+      inflation_percent_change?: number | null;
+      affordability_cap?: number | null;
+    } | null;
+  }>(`/api/postcode/nearest-affordable?${params.toString()}`);
 }
 
 export function fetchSectorRankings(payload: {
@@ -122,6 +162,8 @@ export function fetchSectorRankings(payload: {
     meta?: {
       price_year?: number | null;
       inflation_latest_year?: number | null;
+      inflation_base_index?: number | null;
+      inflation_latest_index?: number | null;
       inflation_factor?: number | null;
     } | null;
   }>(`/api/sector-rankings`, {
