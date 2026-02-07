@@ -78,10 +78,10 @@ export default function App() {
   });
   const [propertyType, setPropertyType] = useState("ALL");
   const [affordability, setAffordability] = useState({
-    monthlyBudget: 2200,
-    deposit: 60000,
+    monthlyBudget: 1200,
+    deposit: 30000,
     mortgageRate: 4.5,
-    termYears: 30,
+    termYears: 25,
   });
   const [commute, setCommute] = useState({
     workplacePostcode: "",
@@ -233,6 +233,12 @@ export default function App() {
       fetchRankingsForBbox(lastBboxRef.current as number[], lastZoomRef.current);
     }, 350);
   }, [affordability, commute, filters, priorityOrder, propertyType]);
+
+  useEffect(() => {
+    if (commute.workplacePostcode && bestFitSort === "score") {
+      setBestFitSort("commute");
+    }
+  }, [commute.workplacePostcode, bestFitSort]);
 
   const scoredSectors = useMemo(() => {
     const rows = [...sectors];

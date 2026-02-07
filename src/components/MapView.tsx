@@ -259,10 +259,15 @@ export default function MapView({
           ? `CPIH 2015=100: ${baseYear} ${baseIndex} → ${latestYear} ${latestIndex}`
           : "CPIH data unavailable";
 
+      const commuteSourceTag =
+        commute?.mode === "PUBLIC"
+          ? `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #cbd5f5;background:#eef2ff;color:#4338ca;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;">TfL</span>`
+          : `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;">Route</span>`;
+
       const commuteLine =
         commuteMinutes !== null || commuteCost !== null || commuteDistance !== null || totalMonthlyCost !== null
           ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
-              <span>Commute (est.)</span>
+              <span>Commute (est.) ${commuteSourceTag}</span>
               <span style="color:#0f172a;font-weight:600;">
                 ${commuteMinutes !== null ? `${commuteMinutes} min` : "—"}
                 ${commuteDistance !== null ? ` · ${commuteDistance} km` : ""}

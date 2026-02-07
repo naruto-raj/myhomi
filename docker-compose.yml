@@ -29,6 +29,8 @@ services:
       DATABASE_URL: postgres://housing_user:housing_pass@db:5432/housing_map
       DATA_DIR: /data
       ZOOM_THRESHOLD: ${ZOOM_THRESHOLD:-8}
+      TFL_APP_ID: ${TFL_APP_ID}
+      TFL_APP_KEY: ${TFL_APP_KEY}
     ports:
       - "5050:5050"
     volumes:

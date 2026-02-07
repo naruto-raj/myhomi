@@ -774,6 +774,10 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
         const rows = rawPoints
           .map((point) => {
             const commute = commuteResult.map.get(point.postcode_norm);
+            const commuteMinutes =
+              commute?.duration_sec && Number.isFinite(commute.duration_sec)
+                ? commute.duration_sec / 60
+                : null;
             const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
               monthlyBudget: safeAffordability.monthlyBudget,
               commuteCostMonthly: commute?.cost_monthly ?? null,
@@ -788,7 +792,13 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
             if (!Number.isFinite(adjustedCap) || adjustedCap <= 0) return null;
             if (Number(point.price_adj ?? 0) > adjustedCap) return null;
             const ratio = Number(point.price_adj ?? 0) / adjustedCap;
-            const weight = Math.max(0.2, Math.min(1, 1 - ratio));
+            const affordabilityWeight = Math.max(0, Math.min(1, 1 - ratio));
+            const commuteScore =
+              commuteMinutes !== null ? Math.max(0, 1 - Math.min(commuteMinutes / 90, 1)) : 0;
+            const weight = Math.max(
+              0.2,
+              Math.min(1, affordabilityWeight * 0.6 + commuteScore * 0.4)
+            );
             return {
               longitude: point.longitude,
               latitude: point.latitude,
@@ -832,6 +842,10 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       const rows = baseRanked.rows
         .map((sector) => {
           const commute = commuteMap.get(sector.sector);
+          const commuteMinutes =
+            commute?.duration_sec && Number.isFinite(commute.duration_sec)
+              ? commute.duration_sec / 60
+              : null;
           const costMonthly = commute?.cost_monthly ?? null;
           const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
             monthlyBudget: safeAffordability.monthlyBudget,
@@ -850,7 +864,13 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
           if (!Number.isFinite(adjustedCap) || adjustedCap <= 0) return null;
           const affordabilityRatio = medianAdj / adjustedCap;
           if (!Number.isFinite(affordabilityRatio) || affordabilityRatio > 1) return null;
-          const weight = Math.max(0, Math.min(1, 1 - affordabilityRatio));
+          const affordabilityWeight = Math.max(0, Math.min(1, 1 - affordabilityRatio));
+          const commuteScore =
+            commuteMinutes !== null ? Math.max(0, 1 - Math.min(commuteMinutes / 90, 1)) : 0;
+          const weight = Math.max(
+            0.2,
+            Math.min(1, affordabilityWeight * 0.6 + commuteScore * 0.4)
+          );
           return {
             longitude: sector.longitude,
             latitude: sector.latitude,

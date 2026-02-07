@@ -1,5 +1,6 @@
 import { pool } from "../db.js";
 import { fetchCommuteMatrix, normalizeCommuteMode } from "../adapters/commute.js";
+import { fetchTflJourney, isWithinLondon } from "../adapters/tfl.js";
 import { getPostcodeLocation } from "./postcodes.js";
 
 const DEFAULT_COST_PER_KM = Number(process.env.COMMUTE_COST_PER_KM || 0.35);
@@ -27,9 +28,10 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(Math.max(num, min), max);
 }
 
-function computeMonthlyCommuteCost(distanceKm, daysPerWeek, costPerKm) {
-  if (!Number.isFinite(distanceKm)) return null;
+function computeMonthlyCommuteCost(distanceKm, fareGbp, daysPerWeek, costPerKm) {
   const tripsPerMonth = daysPerWeek * 2 * WEEKS_PER_MONTH;
+  if (Number.isFinite(fareGbp)) return fareGbp * tripsPerMonth;
+  if (!Number.isFinite(distanceKm)) return null;
   return distanceKm * costPerKm * tripsPerMonth;
 }
 
@@ -180,24 +182,57 @@ export async function getCommuteForSectors({ sectors, workplacePostcode, mode, d
     .slice(0, COMMUTE_MAX_ORIGINS);
 
   try {
-    for (let i = 0; i < missing.length; i += COMMUTE_BATCH_SIZE) {
-      const chunk = missing.slice(i, i + COMMUTE_BATCH_SIZE);
-      const origins = chunk
-        .map((sector) => ({
-          lng: Number(sector.longitude),
-          lat: Number(sector.latitude),
-          origin_key: sector.sector,
-        }))
-        .filter((origin) => Number.isFinite(origin.lng) && Number.isFinite(origin.lat));
+    const useTfl =
+      normalizedMode === "PUBLIC" &&
+      isWithinLondon(dest.latitude, dest.longitude);
+    const tflOrigins = [];
+    const orsOrigins = [];
 
-      if (!origins.length) continue;
+    missing.forEach((sector) => {
+      const lng = Number(sector.longitude);
+      const lat = Number(sector.latitude);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      const origin = { lng, lat, origin_key: sector.sector };
+      if (useTfl && isWithinLondon(lat, lng)) {
+        tflOrigins.push(origin);
+      } else {
+        orsOrigins.push(origin);
+      }
+    });
 
+    for (const origin of tflOrigins) {
+      try {
+        const tfl = await fetchTflJourney({
+          origin: { lng: origin.lng, lat: origin.lat },
+          destination: { lng: dest.longitude, lat: dest.latitude },
+        });
+        const entries = [
+          {
+            origin_key: origin.origin_key,
+            duration_sec: tfl.duration_sec ?? null,
+            distance_km: tfl.distance_km ?? null,
+          },
+        ];
+        await storeCommutes({ destPostcodeNorm, mode: normalizedMode, entries });
+        cached.set(origin.origin_key, {
+          duration_sec: tfl.duration_sec ?? null,
+          distance_km: tfl.distance_km ?? null,
+          fare_gbp: tfl.fare_gbp ?? null,
+        });
+      } catch {
+        orsOrigins.push(origin);
+      }
+    }
+
+    for (let i = 0; i < orsOrigins.length; i += COMMUTE_BATCH_SIZE) {
+      const chunk = orsOrigins.slice(i, i + COMMUTE_BATCH_SIZE);
+      if (!chunk.length) continue;
       const results = await fetchCommuteMatrix({
-        origins,
+        origins: chunk,
         destination: { lng: dest.longitude, lat: dest.latitude },
         mode: normalizedMode,
       });
-      const entries = origins.map((origin, idx) => ({
+      const entries = chunk.map((origin, idx) => ({
         origin_key: origin.origin_key,
         duration_sec: results[idx]?.duration_sec ?? null,
         distance_km: results[idx]?.distance_km ?? null,
@@ -228,7 +263,7 @@ export async function getCommuteForSectors({ sectors, workplacePostcode, mode, d
   const map = new Map();
   cached.forEach((value, key) => {
     const distanceKm = value.distance_km;
-    const costMonthly = computeMonthlyCommuteCost(distanceKm, days, costPerKm);
+    const costMonthly = computeMonthlyCommuteCost(distanceKm, value.fare_gbp, days, costPerKm);
     map.set(key, {
       duration_sec: value.duration_sec,
       distance_km: distanceKm,
@@ -252,16 +287,36 @@ export async function getCommuteForPoint({ origin, workplacePostcode, mode, days
   if (!dest) return null;
 
   const normalizedMode = normalizeCommuteMode(mode);
+  const days = normalizeDays(daysPerWeek);
+  const costPerKm = clampNumber(DEFAULT_COST_PER_KM, 0, 10, 0.35);
+  const useTfl =
+    normalizedMode === "PUBLIC" &&
+    isWithinLondon(origin.lat, origin.lng) &&
+    isWithinLondon(dest.latitude, dest.longitude);
   try {
+    if (useTfl) {
+      const tfl = await fetchTflJourney({
+        origin: { lng: origin.lng, lat: origin.lat },
+        destination: { lng: dest.longitude, lat: dest.latitude },
+      });
+      const costMonthly = computeMonthlyCommuteCost(tfl.distance_km, tfl.fare_gbp, days, costPerKm);
+      return {
+        duration_sec: tfl.duration_sec ?? null,
+        distance_km: tfl.distance_km ?? null,
+        cost_monthly: costMonthly,
+        mode: normalizedMode,
+        days_per_week: days,
+        cost_per_km: costPerKm,
+      };
+    }
+
     const results = await fetchCommuteMatrix({
       origins: [{ lng: origin.lng, lat: origin.lat }],
       destination: { lng: dest.longitude, lat: dest.latitude },
       mode: normalizedMode,
     });
     const entry = results[0] || {};
-    const days = normalizeDays(daysPerWeek);
-    const costPerKm = clampNumber(DEFAULT_COST_PER_KM, 0, 10, 0.35);
-    const costMonthly = computeMonthlyCommuteCost(entry.distance_km, days, costPerKm);
+    const costMonthly = computeMonthlyCommuteCost(entry.distance_km, null, days, costPerKm);
 
     return {
       duration_sec: entry.duration_sec ?? null,
@@ -346,7 +401,7 @@ export async function getCommuteForOrigins({ origins, workplacePostcode, mode, d
   const map = new Map();
   cached.forEach((value, key) => {
     const distanceKm = value.distance_km;
-    const costMonthly = computeMonthlyCommuteCost(distanceKm, days, costPerKm);
+    const costMonthly = computeMonthlyCommuteCost(distanceKm, value.fare_gbp, days, costPerKm);
     map.set(key, {
       duration_sec: value.duration_sec,
       distance_km: distanceKm,
