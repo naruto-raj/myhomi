@@ -2,9 +2,10 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "node:path";
+import { pool } from "./db.js";
 import {
   getLatestPricePaidByPostcode,
-  getNearestAffordablePricePaid,
+  getNearestAffordableCandidates,
   getLatestPricePaidNearPoint,
   getPricePaidByPostcode,
 } from "./services/pricePaid.js";
@@ -18,7 +19,7 @@ import { getInflationFactor } from "./services/inflation.js";
 import { getAffordableHeatmap } from "./services/affordableHeatmap.js";
 import {
   computeEffectiveMonthlyBudget,
-  getCommuteForPoint,
+  getCommuteForOrigins,
   getCommuteForSectors,
   normalizeCostSensitivity,
 } from "./services/commute.js";
@@ -257,17 +258,38 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
     const maxAffordableCap = Math.floor(maxAffordable * 1.05);
 
     let commuteMeta = null;
+    let adjustedAffordabilityCap = null;
+
+    const candidates = await getNearestAffordableCandidates(
+      lng,
+      lat,
+      maxAffordableCap,
+      propertyType,
+      60
+    );
+    if (!candidates.length) {
+      return res.status(404).json({ error: "no affordable postcode found" });
+    }
+
+    let row = affordability.workplacePostcode ? null : candidates[0];
     if (affordability.workplacePostcode) {
-      const commute = await getCommuteForPoint({
-        origin: { lng, lat },
+      const commuteOrigins = candidates.map((candidate) => ({
+        origin_key: candidate.postcode_norm,
+        longitude: candidate.longitude,
+        latitude: candidate.latitude,
+      }));
+      const commuteResult = await getCommuteForOrigins({
+        origins: commuteOrigins,
         workplacePostcode: affordability.workplacePostcode,
         mode: affordability.commuteMode,
         daysPerWeek: affordability.commuteDaysPerWeek,
       });
-      if (commute) {
+
+      for (const candidate of candidates) {
+        const commute = commuteResult.map.get(candidate.postcode_norm);
         const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
           monthlyBudget: affordability.monthlyBudget,
-          commuteCostMonthly: commute.cost_monthly,
+          commuteCostMonthly: commute?.cost_monthly ?? null,
           costSensitivity: affordability.commuteCostSensitivity,
         });
         const adjustedCap = computeMaxAffordableWithBudget({
@@ -276,23 +298,30 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
           mortgageRate: affordability.mortgageRate,
           termYears: affordability.termYears,
         });
-        commuteMeta = {
-          mode: commute.mode,
-          duration_sec: commute.duration_sec,
-          distance_km: commute.distance_km,
-          cost_monthly: commute.cost_monthly,
-          days_per_week: commute.days_per_week,
-          cost_per_km: commute.cost_per_km,
-          effective_monthly_budget: Math.round(effectiveMonthlyBudget),
-          affordability_cap_adjusted: Math.round(adjustedCap),
-        };
+        if (Number(candidate.price_adj ?? 0) <= adjustedCap) {
+          row = candidate;
+          commuteMeta = {
+            ...(commuteResult.meta || {}),
+            duration_sec: commute?.duration_sec ?? null,
+            distance_km: commute?.distance_km ?? null,
+            cost_monthly: commute?.cost_monthly ?? null,
+            effective_monthly_budget: Math.round(effectiveMonthlyBudget),
+            affordability_cap_adjusted: Math.round(adjustedCap),
+          };
+          adjustedAffordabilityCap = adjustedCap;
+          break;
+        }
       }
     }
 
-    const row = await getNearestAffordablePricePaid(lng, lat, maxAffordableCap, propertyType);
     if (!row) {
-      return res.status(404).json({ error: "no affordable postcode found" });
+      return res.status(404).json({ error: "no commute-affordable postcode found" });
     }
+
+    const capToUse =
+      Number.isFinite(adjustedAffordabilityCap) && adjustedAffordabilityCap > 0
+        ? adjustedAffordabilityCap
+        : maxAffordableCap;
 
     const transactionYear = row?.date_of_transfer
       ? new Date(row.date_of_transfer).getUTCFullYear()
@@ -331,7 +360,8 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
             inflation_factor: inflation.factor,
             inflation_adjusted_price: inflationAdjusted,
             inflation_percent_change: pctChange,
-            affordability_cap: Math.round(maxAffordableCap),
+            affordability_cap: Math.round(capToUse),
+            affordability_cap_base: Math.round(maxAffordableCap),
             commute: commuteMeta,
             mortgage_monthly: Math.round(mortgageMonthly),
             total_monthly_cost: Math.round(totalMonthlyCost),
@@ -349,7 +379,8 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
             inflation_factor: null,
             inflation_adjusted_price: null,
             inflation_percent_change: null,
-            affordability_cap: Math.round(maxAffordableCap),
+            affordability_cap: Math.round(capToUse),
+            affordability_cap_base: Math.round(maxAffordableCap),
             commute: commuteMeta,
             mortgage_monthly: Math.round(mortgageMonthly),
             total_monthly_cost: Math.round(totalMonthlyCost),
@@ -685,7 +716,102 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
 
+    const pointZoomThreshold = Number(process.env.POINT_ZOOM_THRESHOLD || 10);
+    const usePoints = Number.isFinite(zoom) && zoom >= pointZoomThreshold;
+
     if (safeAffordability.workplacePostcode) {
+      if (usePoints) {
+        const { rows: rawPoints } = await pool.query(
+          `
+            SELECT
+              postcode_norm,
+              longitude,
+              latitude,
+              price_adj
+            FROM postcode_latest
+            WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+              AND price_adj <= $5
+              AND ($6::text = 'ALL' OR property_type = $6::text)
+            ORDER BY price_adj ASC
+            LIMIT $7;
+          `,
+          [
+            minLng,
+            minLat,
+            maxLng,
+            maxLat,
+            maxPriceCap,
+            safePropertyType,
+            Math.min(Number(limit), 5000),
+          ]
+        );
+
+        if (!rawPoints.length) {
+          return res.json({
+            mode: "points",
+            rows: [],
+            meta: {
+              affordability_cap: maxPriceCap,
+              property_type: safePropertyType,
+              zoom: Number(zoom),
+            },
+          });
+        }
+
+        const commuteOrigins = rawPoints.map((point) => ({
+          origin_key: point.postcode_norm,
+          longitude: point.longitude,
+          latitude: point.latitude,
+        }));
+
+        const commuteResult = await getCommuteForOrigins({
+          origins: commuteOrigins,
+          workplacePostcode: safeAffordability.workplacePostcode,
+          mode: safeAffordability.commuteMode,
+          daysPerWeek: safeAffordability.commuteDaysPerWeek,
+        });
+
+        const rows = rawPoints
+          .map((point) => {
+            const commute = commuteResult.map.get(point.postcode_norm);
+            const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
+              monthlyBudget: safeAffordability.monthlyBudget,
+              commuteCostMonthly: commute?.cost_monthly ?? null,
+              costSensitivity: safeAffordability.commuteCostSensitivity,
+            });
+            const adjustedCap = computeMaxAffordableWithBudget({
+              monthlyBudget: effectiveMonthlyBudget,
+              deposit: safeAffordability.deposit,
+              mortgageRate: safeAffordability.mortgageRate,
+              termYears: safeAffordability.termYears,
+            });
+            if (!Number.isFinite(adjustedCap) || adjustedCap <= 0) return null;
+            if (Number(point.price_adj ?? 0) > adjustedCap) return null;
+            const ratio = Number(point.price_adj ?? 0) / adjustedCap;
+            const weight = Math.max(0.2, Math.min(1, 1 - ratio));
+            return {
+              longitude: point.longitude,
+              latitude: point.latitude,
+              weight,
+              count: 1,
+            };
+          })
+          .filter(Boolean);
+
+        const payload = {
+          mode: "points",
+          rows,
+          meta: {
+            affordability_cap: maxPriceCap,
+            property_type: safePropertyType,
+            zoom: Number(zoom),
+            commute: commuteResult.meta ?? null,
+          },
+        };
+        setCache(cacheKey, payload, 20_000);
+        return res.json(payload);
+      }
+
       const baseRanked = await getRankedSectors({
         scope: "viewport",
         bbox,

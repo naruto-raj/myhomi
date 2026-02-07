@@ -276,6 +276,95 @@ export async function getCommuteForPoint({ origin, workplacePostcode, mode, days
   }
 }
 
+export async function getCommuteForOrigins({ origins, workplacePostcode, mode, daysPerWeek }) {
+  const dest = await getPostcodeLocation(workplacePostcode);
+  if (!dest) {
+    return { map: new Map(), meta: { error: "workplace postcode not found" } };
+  }
+
+  await ensureCacheTable();
+
+  const normalizedMode = normalizeCommuteMode(mode);
+  const destPostcodeNorm = normalizePostcode(dest.postcode);
+  const originKeys = origins.map((origin) => origin.origin_key).filter(Boolean);
+  const cached = await loadCachedCommutes({
+    originKeys,
+    destPostcodeNorm,
+    mode: normalizedMode,
+  });
+
+  const missing = origins
+    .filter((origin) => !cached.has(origin.origin_key))
+    .slice(0, COMMUTE_MAX_ORIGINS);
+
+  try {
+    for (let i = 0; i < missing.length; i += COMMUTE_BATCH_SIZE) {
+      const chunk = missing.slice(i, i + COMMUTE_BATCH_SIZE);
+      const chunkOrigins = chunk
+        .map((origin) => ({
+          lng: Number(origin.longitude),
+          lat: Number(origin.latitude),
+          origin_key: origin.origin_key,
+        }))
+        .filter((origin) => Number.isFinite(origin.lng) && Number.isFinite(origin.lat));
+
+      if (!chunkOrigins.length) continue;
+
+      const results = await fetchCommuteMatrix({
+        origins: chunkOrigins,
+        destination: { lng: dest.longitude, lat: dest.latitude },
+        mode: normalizedMode,
+      });
+      const entries = chunkOrigins.map((origin, idx) => ({
+        origin_key: origin.origin_key,
+        duration_sec: results[idx]?.duration_sec ?? null,
+        distance_km: results[idx]?.distance_km ?? null,
+      }));
+      await storeCommutes({ destPostcodeNorm, mode: normalizedMode, entries });
+      entries.forEach((entry) => {
+        cached.set(entry.origin_key, {
+          duration_sec: entry.duration_sec,
+          distance_km: entry.distance_km,
+        });
+      });
+    }
+  } catch (err) {
+    return {
+      map: new Map(),
+      meta: {
+        mode: normalizedMode,
+        days_per_week: normalizeDays(daysPerWeek),
+        cost_per_km: clampNumber(DEFAULT_COST_PER_KM, 0, 10, 0.35),
+        destination: dest,
+        error: err?.message || "Commute lookup failed",
+      },
+    };
+  }
+
+  const days = normalizeDays(daysPerWeek);
+  const costPerKm = clampNumber(DEFAULT_COST_PER_KM, 0, 10, 0.35);
+  const map = new Map();
+  cached.forEach((value, key) => {
+    const distanceKm = value.distance_km;
+    const costMonthly = computeMonthlyCommuteCost(distanceKm, days, costPerKm);
+    map.set(key, {
+      duration_sec: value.duration_sec,
+      distance_km: distanceKm,
+      cost_monthly: costMonthly,
+    });
+  });
+
+  return {
+    map,
+    meta: {
+      mode: normalizedMode,
+      days_per_week: days,
+      cost_per_km: costPerKm,
+      destination: dest,
+    },
+  };
+}
+
 export function computeEffectiveMonthlyBudget({ monthlyBudget, commuteCostMonthly, costSensitivity }) {
   const sensitivity = clampNumber(costSensitivity, 0, 1, 0);
   const cost = Number.isFinite(commuteCostMonthly) ? commuteCostMonthly : 0;

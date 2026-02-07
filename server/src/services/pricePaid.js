@@ -129,6 +129,39 @@ export async function getNearestAffordablePricePaid(longitude, latitude, maxPric
   return rows[0] || null;
 }
 
+export async function getNearestAffordableCandidates(
+  longitude,
+  latitude,
+  maxPrice,
+  propertyType,
+  limit = 30
+) {
+  const filterByType = propertyType && propertyType !== "ALL";
+  const { rows } = await pool.query(
+    `
+      SELECT
+        pl.postcode,
+        pl.postcode_norm,
+        pl.latitude,
+        pl.longitude,
+        pl.transaction_id,
+        pl.price,
+        pl.date_of_transfer,
+        pl.property_type,
+        pl.old_new,
+        pl.duration,
+        pl.price_adj
+      FROM postcode_latest pl
+      WHERE pl.price_adj <= $3
+        AND (COALESCE($4::boolean, false) = false OR pl.property_type = $5)
+      ORDER BY pl.geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
+      LIMIT $6;
+    `,
+    [longitude, latitude, maxPrice, filterByType, propertyType || null, limit]
+  );
+  return rows;
+}
+
 export async function getPricePaidSummaryByDistrict(district, limit = 50) {
   const { rows } = await pool.query(
     `

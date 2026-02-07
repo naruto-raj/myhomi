@@ -223,8 +223,6 @@ export default function MapView({
       const mortgageMonthly = result.meta?.mortgage_monthly ?? null;
       const totalMonthlyCost = result.meta?.total_monthly_cost ?? null;
       const budgetRemaining = result.meta?.budget_remaining ?? null;
-      const effectiveBudget = commute?.effective_monthly_budget ?? null;
-      const affordabilityCapAdjusted = commute?.affordability_cap_adjusted ?? null;
       const propertyTypeCode = row?.property_type ?? null;
       const propertyTypeLabel =
         propertyTypeCode === "D"
@@ -239,10 +237,11 @@ export default function MapView({
                   ? "Other"
                   : "Unknown";
 
-      map.flyTo({
+      map.easeTo({
         center: [targetLng, targetLat],
         zoom: Math.max(map.getZoom(), 13),
         speed: 1.2,
+        offset: [0, -140],
       });
 
       const inflationLine =
@@ -263,7 +262,7 @@ export default function MapView({
       const commuteLine =
         commuteMinutes !== null || commuteCost !== null || commuteDistance !== null || totalMonthlyCost !== null
           ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
-              <span>Commute</span>
+              <span>Commute (est.)</span>
               <span style="color:#0f172a;font-weight:600;">
                 ${commuteMinutes !== null ? `${commuteMinutes} min` : "—"}
                 ${commuteDistance !== null ? ` · ${commuteDistance} km` : ""}
@@ -288,79 +287,67 @@ export default function MapView({
             }
             ${
               budgetRemaining !== null
-                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>Budget remaining</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(budgetRemaining).toLocaleString()}</span>
-                  </div>`
+                ? (() => {
+                    const isPositive = Number(budgetRemaining) >= 0;
+                    const arrow = isPositive ? "▲" : "▼";
+                    const color = isPositive ? "#16a34a" : "#dc2626";
+                    return `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                      <span>Budget remaining</span>
+                      <span style=\"color:${color};font-weight:700;display:inline-flex;align-items:center;gap:6px;\">
+                        ${arrow} £${Math.abs(Math.round(budgetRemaining)).toLocaleString()}
+                      </span>
+                    </div>`;
+                  })()
                 : ""
             }
-            ${
-              effectiveBudget !== null
-                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>Effective budget</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(effectiveBudget).toLocaleString()}</span>
-                  </div>`
-                : ""
-            }
-            ${
-              affordabilityCapAdjusted !== null
-                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>Adj. affordability</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(affordabilityCapAdjusted).toLocaleString()}</span>
-                  </div>`
-                : ""
-            }`
+            `
           : "";
 
       const sectorLine =
-        options?.sectorMedian || options?.sectorMedianAdj
+        options?.sectorMedianAdj
           ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
-              <span>Sector median</span>
-              <span style="color:#0f172a;font-weight:600;">£${options?.sectorMedian ? Number(options.sectorMedian).toLocaleString() : "—"}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
               <span>Sector adj. ${latestYear ?? ""}</span>
-              <span style="color:#0f172a;font-weight:600;">£${options?.sectorMedianAdj ? Number(options.sectorMedianAdj).toLocaleString() : "—"}</span>
+              <span style="color:#0f172a;font-weight:600;">£${Number(options.sectorMedianAdj).toLocaleString()}</span>
             </div>`
           : "";
 
       const html = `
         <div class="map-popup">
-          <div class="map-popup__card">
+          <div class="map-popup__card" style="max-width:280px;padding:12px;">
             <button type="button" class="map-popup__close" aria-label="Close">×</button>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <div style="font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#64748b;">${label}</div>
+              <div style="font-size:9px; letter-spacing:0.16em; text-transform:uppercase; color:#64748b;">${label}</div>
               ${pctBadge}
             </div>
-            <div style="margin-top:8px; font-size:18px; font-weight:700; color:#0f172a; font-family:var(--font-display, ui-serif, Georgia, serif);">
+            <div style="margin-top:6px; font-size:16px; font-weight:700; color:#0f172a; font-family:var(--font-display, ui-serif, Georgia, serif);">
               ${row?.postcode ?? "Nearest sale"}
             </div>
-            <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
-              <span style="padding:3px 8px; border-radius:999px; background:#fef3c7; font-size:11px; color:#92400e;">
+            <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px;">
+              <span style="padding:2px 8px; border-radius:999px; background:#fef3c7; font-size:10px; color:#92400e;">
                 ${propertyTypeLabel}
               </span>
             </div>
 
-            <div style="margin-top:12px; padding:10px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0;">
+            <div style="margin-top:8px; padding:8px; border-radius:10px; background:#f8fafc; border:1px solid #e2e8f0;">
               <div style="display:flex;justify-content:space-between;align-items:end;gap:8px;">
-                <span style="font-size:11px; color:#64748b;">Adj. ${latestYear ?? ""}</span>
+                <span style="font-size:10px; color:#64748b;">Adj. ${latestYear ?? ""}</span>
                 ${inflationLine}
               </div>
-              <div style="margin-top:8px; display:flex;justify-content:space-between;align-items:end;gap:8px;">
-                <span style="font-size:11px; color:#64748b;">Last price</span>
-                <span style="font-size:15px; font-weight:600; color:#0f172a;">
+              <div style="margin-top:6px; display:flex;justify-content:space-between;align-items:end;gap:8px;">
+                <span style="font-size:10px; color:#64748b;">Last price</span>
+                <span style="font-size:13px; font-weight:600; color:#0f172a;">
                   £${price ? Number(price).toLocaleString() : "—"}
                 </span>
               </div>
-              <div style="margin-top:4px; font-size:11px; color:#94a3b8;">
+              <div style="margin-top:2px; font-size:10px; color:#94a3b8;">
                 ${date}${year ? ` (${year})` : ""}
               </div>
             </div>
 
-            <div style="margin-top:10px; display:grid; grid-template-columns:1fr; gap:6px;">
+            <div style="margin-top:8px; display:grid; grid-template-columns:1fr; gap:4px;">
               ${sectorLine}
               ${commuteLine}
-              <div style="font-size:10px; color:#94a3b8;">${inflationMeta}</div>
+              <div style="font-size:9px; color:#94a3b8;">${inflationMeta}</div>
             </div>
           </div>
         </div>
@@ -447,7 +434,7 @@ export default function MapView({
             ["linear"],
             ["coalesce", ["get", "weight"], 1],
             0,
-            0.15,
+            0.3,
             1,
             1,
           ],
@@ -456,30 +443,30 @@ export default function MapView({
             ["linear"],
             ["zoom"],
             5,
-            0.6,
+            0.9,
             9,
-            1.2,
+            1.7,
             12,
-            1.6,
+            2.2,
           ],
           "heatmap-radius": [
             "interpolate",
             ["linear"],
             ["zoom"],
             5,
-            20,
+            26,
             9,
-            28,
+            34,
             12,
-            40,
+            48,
           ],
-          "heatmap-opacity": 0.85,
+          "heatmap-opacity": 0.9,
           "heatmap-color": [
             "interpolate",
             ["linear"],
             ["heatmap-density"],
             0,
-            "rgba(15,23,42,0)",
+            "rgba(15,23,42,0.12)",
             0.2,
             "#38bdf8",
             0.4,

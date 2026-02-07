@@ -166,7 +166,25 @@ export default function App() {
         setSectors(rankedData.rows);
         setRankMeta(rankedData.meta ?? null);
         setTypeRanges(rankedData.meta?.type_ranges ?? []);
-        setAffordableHeatmap(heatmapData.rows ?? []);
+        let heatmapRows = heatmapData.rows ?? [];
+        if (heatmapRows.length === 0 && rankedData.rows?.length) {
+          heatmapRows = rankedData.rows
+            .filter((sector) => Number.isFinite(sector.longitude) && Number.isFinite(sector.latitude))
+            .map((sector) => {
+              const ratio =
+                typeof sector.affordability_ratio === "number"
+                  ? Math.max(0, Math.min(1, sector.affordability_ratio))
+                  : null;
+              const weight = ratio !== null ? Math.max(0.2, 1 - ratio) : 0.6;
+              return {
+                longitude: sector.longitude,
+                latitude: sector.latitude,
+                weight,
+                count: sector.transactions ?? 1,
+              } as AffordableHeatmapPoint;
+            });
+        }
+        setAffordableHeatmap(heatmapRows);
       })
       .catch(() => {
         if (requestId !== requestIdRef.current) return;
