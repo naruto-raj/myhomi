@@ -73,11 +73,31 @@ export function fetchPostcodeLatest(postcode: string) {
     row: PostcodeLatest;
     meta?: {
       price_year?: number | null;
+      inflation_base_year?: number | null;
       inflation_latest_year?: number | null;
       inflation_factor?: number | null;
       inflation_adjusted_price?: number | null;
     } | null;
   }>(`/api/postcode/latest?${params.toString()}`);
+}
+
+export function fetchNearestPostcode(lat: number, lng: number) {
+  const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  return json<{
+    row: PostcodeLatest & {
+      latitude?: number;
+      longitude?: number;
+      postcode_norm?: string;
+    };
+    meta?: {
+      price_year?: number | null;
+      inflation_base_year?: number | null;
+      inflation_latest_year?: number | null;
+      inflation_factor?: number | null;
+      inflation_adjusted_price?: number | null;
+      inflation_percent_change?: number | null;
+    } | null;
+  }>(`/api/postcode/nearest?${params.toString()}`);
 }
 
 export function fetchSectorRankings(payload: {

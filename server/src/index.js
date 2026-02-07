@@ -2,7 +2,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "node:path";
-import { getLatestPricePaidByPostcode, getPricePaidByPostcode } from "./services/pricePaid.js";
+import {
+  getLatestPricePaidByPostcode,
+  getLatestPricePaidNearPoint,
+  getPricePaidByPostcode,
+} from "./services/pricePaid.js";
 import { getPricePaidInViewport } from "./services/pricePaidViewport.js";
 import { getPostcodeLocation } from "./services/postcodes.js";
 import { getSectorsInViewport } from "./services/sectors.js";
@@ -85,25 +89,88 @@ app.get("/api/postcode/latest", async (req, res) => {
     if (!row) {
       return res.status(404).json({ error: "postcode not found" });
     }
-    const meta = await getDataMeta();
-    const priceYear = meta.price_paid_max_year ? Number(meta.price_paid_max_year) : null;
-    const inflation = priceYear ? getInflationFactor(priceYear) : null;
+    const transactionYear = row?.date_of_transfer
+      ? new Date(row.date_of_transfer).getUTCFullYear()
+      : null;
+    const inflation = transactionYear ? getInflationFactor(transactionYear) : null;
     const inflationAdjusted =
       inflation?.factor && row.price ? Math.round(Number(row.price) * inflation.factor) : null;
+    const pctChange =
+      inflationAdjusted && row.price
+        ? ((inflationAdjusted - Number(row.price)) / Number(row.price)) * 100
+        : null;
 
     res.json({
       row,
       meta: inflation
         ? {
             price_year: inflation.fromYear,
+            inflation_base_year: inflation.baseYear,
             inflation_latest_year: inflation.latestYear,
             inflation_factor: inflation.factor,
             inflation_adjusted_price: inflationAdjusted,
+            inflation_percent_change: pctChange,
           }
-        : { price_year: priceYear, inflation_latest_year: null, inflation_factor: null, inflation_adjusted_price: null },
+        : {
+            price_year: transactionYear,
+            inflation_base_year: null,
+            inflation_latest_year: null,
+            inflation_factor: null,
+            inflation_adjusted_price: null,
+            inflation_percent_change: null,
+          },
     });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to fetch postcode details" });
+  }
+});
+
+app.get("/api/postcode/nearest", async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ error: "lat and lng are required" });
+    }
+
+    const row = await getLatestPricePaidNearPoint(lng, lat);
+    if (!row) {
+      return res.status(404).json({ error: "postcode not found" });
+    }
+
+    const transactionYear = row?.date_of_transfer
+      ? new Date(row.date_of_transfer).getUTCFullYear()
+      : null;
+    const inflation = transactionYear ? getInflationFactor(transactionYear) : null;
+    const inflationAdjusted =
+      inflation?.factor && row.price ? Math.round(Number(row.price) * inflation.factor) : null;
+    const pctChange =
+      inflationAdjusted && row.price
+        ? ((inflationAdjusted - Number(row.price)) / Number(row.price)) * 100
+        : null;
+
+    res.json({
+      row,
+      meta: inflation
+        ? {
+            price_year: inflation.fromYear,
+            inflation_base_year: inflation.baseYear,
+            inflation_latest_year: inflation.latestYear,
+            inflation_factor: inflation.factor,
+            inflation_adjusted_price: inflationAdjusted,
+            inflation_percent_change: pctChange,
+          }
+        : {
+            price_year: transactionYear,
+            inflation_base_year: null,
+            inflation_latest_year: null,
+            inflation_factor: null,
+            inflation_adjusted_price: null,
+            inflation_percent_change: null,
+          },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch nearest postcode" });
   }
 });
 

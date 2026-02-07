@@ -21,11 +21,22 @@ export function getInflationFactor(fromYear) {
   if (!fromYear) return null;
   const latestYear = getLatestCpihYear();
   if (!latestYear) return null;
-  const base = cpihAnnual[String(fromYear)];
+  const availableYears = Object.keys(cpihAnnual)
+    .map((year) => Number(year))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (!availableYears.length) return null;
+
+  const baseYear = cpihAnnual[String(fromYear)]
+    ? fromYear
+    : availableYears.filter((year) => year <= fromYear).pop() ?? availableYears[0];
+
+  const base = cpihAnnual[String(baseYear)];
   const latest = cpihAnnual[String(latestYear)];
   if (!base || !latest) return null;
   return {
     fromYear,
+    baseYear,
     latestYear,
     factor: latest / base,
   };

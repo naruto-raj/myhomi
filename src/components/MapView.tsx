@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import type { PricePaidPoint, SectorStat } from "../api/client";
+import { fetchNearestPostcode } from "../api/client";
 
 type Props = {
   pricePaidPoints: PricePaidPoint[];
@@ -37,6 +38,7 @@ export default function MapView({
         id: point.transaction_id,
         properties: {
           price: point.price,
+          postcode: point.postcode,
         },
         geometry: {
           type: "Point",
@@ -194,6 +196,7 @@ export default function MapView({
       });
 
       const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
+      const clickPopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false });
 
       map.on("mousemove", "sector-points", (event) => {
         if (!showCentroidsRef.current) return;
@@ -215,6 +218,54 @@ export default function MapView({
 
       map.on("mouseleave", "sector-points", () => {
         popup.remove();
+      });
+
+      map.on("click", async (event) => {
+        if (!event.lngLat) return;
+        try {
+          const result = await fetchNearestPostcode(event.lngLat.lat, event.lngLat.lng);
+          const row = result.row;
+          const rawDate = row?.date_of_transfer ? String(row.date_of_transfer) : "";
+          const parsedDate = rawDate ? new Date(rawDate) : null;
+          const date =
+            parsedDate && !Number.isNaN(parsedDate.valueOf())
+              ? parsedDate.toLocaleDateString("en-GB", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "—";
+          const year =
+            parsedDate && !Number.isNaN(parsedDate.valueOf()) ? parsedDate.getUTCFullYear() : null;
+          const price = row?.price ?? null;
+          const adjusted = result.meta?.inflation_adjusted_price ?? null;
+          const pct = result.meta?.inflation_percent_change ?? null;
+          const pctText = pct !== null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
+          const arrow = pct === null ? "" : pct > 0 ? "▲" : pct < 0 ? "▼" : "•";
+          const color = pct === null ? "#0f172a" : pct > 0 ? "#16a34a" : pct < 0 ? "#dc2626" : "#64748b";
+
+          const inflationLine =
+            adjusted !== null
+              ? `<div>Adj. ${result.meta?.inflation_latest_year ?? ""}: £${Number(adjusted).toLocaleString()}</div>`
+              : `<div style="color:#94a3b8">Adj. price unavailable</div>`;
+
+          const html = `
+            <div style="font-size:12px">
+              <div style="font-weight:600">${row?.postcode ?? "Nearest sale"}</div>
+              <div>Latest sale: ${date}${year ? ` (${year})` : ""}</div>
+              <div>Price: £${price ? Number(price).toLocaleString() : "—"}</div>
+              ${inflationLine}
+              ${
+                pct !== null
+                  ? `<div style="color:${color}; font-weight:600;">${arrow} ${pctText}</div>`
+                  : ""
+              }
+            </div>
+          `;
+          clickPopup.setLngLat(event.lngLat).setHTML(html).addTo(map);
+        } catch {
+          // ignore
+        }
       });
 
       if (onViewportChangeRef.current) {

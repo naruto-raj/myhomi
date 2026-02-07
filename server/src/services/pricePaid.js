@@ -63,6 +63,45 @@ export async function getLatestPricePaidByPostcode(postcode) {
   return rows[0] || null;
 }
 
+export async function getLatestPricePaidNearPoint(longitude, latitude) {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        pc.postcode,
+        pc.postcode_norm,
+        pc.latitude,
+        pc.longitude,
+        pp.transaction_id,
+        pp.price,
+        pp.date_of_transfer,
+        pp.property_type,
+        pp.old_new,
+        pp.duration,
+        pp.paon,
+        pp.saon,
+        pp.street,
+        pp.locality,
+        pp.town_city,
+        pp.district,
+        pp.county,
+        pp.ppd_category_type,
+        pp.record_status
+      FROM postcode_coords pc
+      JOIN LATERAL (
+        SELECT *
+        FROM price_paid
+        WHERE postcode_norm = pc.postcode_norm
+        ORDER BY date_of_transfer DESC
+        LIMIT 1
+      ) pp ON true
+      ORDER BY pc.geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
+      LIMIT 1;
+    `,
+    [longitude, latitude]
+  );
+  return rows[0] || null;
+}
+
 export async function getPricePaidSummaryByDistrict(district, limit = 50) {
   const { rows } = await pool.query(
     `

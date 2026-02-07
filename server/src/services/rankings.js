@@ -105,9 +105,15 @@ export async function getRankedSectors({
     meta: inflation
       ? {
           price_year: inflation.fromYear,
+          inflation_base_year: inflation.baseYear,
           inflation_latest_year: inflation.latestYear,
           inflation_factor: inflation.factor,
         }
-      : { price_year: priceYear, inflation_latest_year: null, inflation_factor: null },
+      : {
+          price_year: priceYear,
+          inflation_base_year: null,
+          inflation_latest_year: null,
+          inflation_factor: null,
+        },
   };
 }
