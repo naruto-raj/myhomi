@@ -49,6 +49,17 @@ export default function App() {
     inflation_latest_index?: number | null;
     inflation_factor?: number | null;
     type_ranges?: PropertyTypeRange[];
+    commute?: {
+      mode?: string | null;
+      days_per_week?: number | null;
+      cost_per_km?: number | null;
+      destination?: {
+        postcode?: string;
+        latitude?: number;
+        longitude?: number;
+      } | null;
+      error?: string | null;
+    } | null;
   } | null>(null);
   const [typeRanges, setTypeRanges] = useState<PropertyTypeRange[]>([]);
   const [affordableHeatmap, setAffordableHeatmap] = useState<AffordableHeatmapPoint[]>([]);
@@ -72,11 +83,17 @@ export default function App() {
     mortgageRate: 4.5,
     termYears: 30,
   });
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [commute, setCommute] = useState({
+    workplacePostcode: "",
+    commuteMode: "PUBLIC",
+    commuteDaysPerWeek: 5,
+    commuteCostSensitivity: 0.6,
+  });
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showCentroids, setShowCentroids] = useState(false);
   const [showBestFit, setShowBestFit] = useState(true);
   const [selectedSector, setSelectedSector] = useState<SectorStat | null>(null);
+  const [bestFitSort, setBestFitSort] = useState("score");
   const zoomThreshold = Number(import.meta.env.VITE_ZOOM_THRESHOLD || 8);
 
   const viewportTimer = useRef<number | null>(null);
@@ -114,7 +131,13 @@ export default function App() {
     const payload = {
       zoom,
       bbox,
-      affordability,
+      affordability: {
+        ...affordability,
+        workplacePostcode: commute.workplacePostcode || null,
+        commuteMode: commute.commuteMode,
+        commuteDaysPerWeek: commute.commuteDaysPerWeek,
+        commuteCostSensitivity: commute.commuteCostSensitivity,
+      },
       filters,
       priorities: priorityOrder,
       propertyType,
@@ -191,9 +214,33 @@ export default function App() {
     viewportTimer.current = window.setTimeout(() => {
       fetchRankingsForBbox(lastBboxRef.current as number[], lastZoomRef.current);
     }, 350);
-  }, [affordability, filters, priorityOrder, propertyType]);
+  }, [affordability, commute, filters, priorityOrder, propertyType]);
 
-  const scoredSectors = useMemo(() => sectors, [sectors]);
+  const scoredSectors = useMemo(() => {
+    const rows = [...sectors];
+    const compareNullable = (a: number | null | undefined, b: number | null | undefined) => {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return a - b;
+    };
+
+    switch (bestFitSort) {
+      case "commute":
+        rows.sort((a, b) => compareNullable(a.commute_minutes, b.commute_minutes));
+        break;
+      case "cost":
+        rows.sort((a, b) => compareNullable(a.commute_cost_monthly, b.commute_cost_monthly));
+        break;
+      case "affordability":
+        rows.sort((a, b) => compareNullable(a.affordability_ratio, b.affordability_ratio));
+        break;
+      default:
+        rows.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+        break;
+    }
+    return rows;
+  }, [sectors, bestFitSort]);
 
   const handlePostcodeSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -238,7 +285,13 @@ export default function App() {
       {
         zoom: lastZoomRef.current,
         bbox: lastBboxRef.current,
-        affordability,
+        affordability: {
+          ...affordability,
+          workplacePostcode: commute.workplacePostcode || null,
+          commuteMode: commute.commuteMode,
+          commuteDaysPerWeek: commute.commuteDaysPerWeek,
+          commuteCostSensitivity: commute.commuteCostSensitivity,
+        },
         filters,
         priorities: priorityOrder,
         propertyType,
@@ -246,7 +299,7 @@ export default function App() {
       null,
       2
     );
-  }, [affordability, filters, priorityOrder, propertyType, currentZoom]);
+  }, [affordability, commute, filters, priorityOrder, propertyType, currentZoom]);
 
   return (
     <div className="min-h-screen text-slate-900">
@@ -332,6 +385,71 @@ export default function App() {
                 </div>
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
                   Max affordable price: £{Math.round(maxAffordable).toLocaleString()}
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Commute</p>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="text-xs text-slate-600">Workplace postcode</label>
+                      <input
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                        type="text"
+                        placeholder="e.g., SE1 2AA"
+                        value={commute.workplacePostcode}
+                        onChange={(e) =>
+                          setCommute({ ...commute, workplacePostcode: e.target.value.toUpperCase() })
+                        }
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-600">Mode</label>
+                        <select
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          value={commute.commuteMode}
+                          onChange={(e) => setCommute({ ...commute, commuteMode: e.target.value })}
+                        >
+                          <option value="PUBLIC">Public transport</option>
+                          <option value="DRIVING">Driving</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-600">Days / week</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          type="number"
+                          min={1}
+                          max={7}
+                          value={commute.commuteDaysPerWeek}
+                          onChange={(e) =>
+                            setCommute({ ...commute, commuteDaysPerWeek: Number(e.target.value) })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-600">
+                        Cost sensitivity: {(commute.commuteCostSensitivity * 100).toFixed(0)}%
+                      </label>
+                      <input
+                        className="mt-2 w-full"
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={commute.commuteCostSensitivity * 100}
+                        onChange={(e) =>
+                          setCommute({
+                            ...commute,
+                            commuteCostSensitivity: Number(e.target.value) / 100,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-500">
+                    Commute cost reduces affordability based on sensitivity. Public transport uses driving time in the MVP.
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs text-slate-600">Property type</label>
@@ -470,8 +588,35 @@ export default function App() {
           <div className="mt-6 rounded-2xl border border-slate-200/70 bg-white/90 p-4 text-sm shadow-sm">
             <p className="font-semibold text-slate-900">Best Postcode Sectors</p>
             <p className="mt-1 text-xs text-slate-600">
-              Ranked by latest affordable sale density (CPIH-adjusted). Commute, schools, and crime will plug in once datasets are ingested.
+              Ranked by latest affordable sale density (CPIH-adjusted) and commute impact when available.
             </p>
+            {rankMeta?.commute?.destination?.postcode && (
+              <p className="mt-2 text-[10px] text-slate-500">
+                Commute target: {rankMeta.commute.destination.postcode}
+                {rankMeta.commute.mode ? ` · ${rankMeta.commute.mode}` : ""}
+              </p>
+            )}
+            {rankMeta?.commute?.error && (
+              <p className="mt-2 text-[10px] text-rose-500">
+                Commute lookup unavailable: {rankMeta.commute.error}
+              </p>
+            )}
+            <div className="mt-3">
+              <label className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Sort by</label>
+              <select
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                value={bestFitSort}
+                onChange={(e) => setBestFitSort(e.target.value)}
+              >
+                <option value="score">Overall best fit</option>
+                <option value="commute">Commute time (shortest)</option>
+                <option value="cost">Commute cost (lowest)</option>
+                <option value="affordability">Affordability ratio (lowest)</option>
+              </select>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Commute time is derived; cost sensitivity reduces affordability.
+              </p>
+            </div>
             {rankMeta?.price_year && rankMeta?.inflation_latest_year && (
               <p className="mt-2 text-[10px] text-slate-500">
                 CPIH (2015=100): {rankMeta.price_year} {rankMeta.inflation_base_index ?? "—"} →{" "}
@@ -490,12 +635,35 @@ export default function App() {
                   onClick={() => setSelectedSector({ ...sector })}
                   className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60"
                 >
-                  <span>
-                    <span className="font-medium">{sector.sector}</span>
-                    <span className="block text-[10px] text-slate-500">
-                      Affordable latest sales: {sector.transactions ?? 0}
+                    <span>
+                      <span className="font-medium">{sector.sector}</span>
+                      <span className="block text-[10px] text-slate-500">
+                        Affordable latest sales: {sector.transactions ?? 0}
+                      </span>
+                      {sector.commute_minutes != null && (
+                        <span className="block text-[10px] text-slate-500">
+                          Commute: {Math.round(sector.commute_minutes)} min
+                          {sector.commute_cost_monthly != null
+                            ? ` · £${Math.round(sector.commute_cost_monthly).toLocaleString()}/mo`
+                            : ""}
+                        </span>
+                      )}
+                      {sector.total_monthly_cost_adjusted != null && (
+                        <span className="block text-[10px] text-slate-500">
+                          Total monthly (adj): £{Math.round(sector.total_monthly_cost_adjusted).toLocaleString()}
+                        </span>
+                      )}
+                      {sector.effective_monthly_budget != null && (
+                        <span className="block text-[10px] text-slate-500">
+                          Effective budget: £{Math.round(sector.effective_monthly_budget).toLocaleString()}
+                        </span>
+                      )}
+                      {sector.affordability_cap_adjusted != null && (
+                        <span className="block text-[10px] text-slate-500">
+                          Adj. affordability: £{Math.round(sector.affordability_cap_adjusted).toLocaleString()}
+                        </span>
+                      )}
                     </span>
-                  </span>
                   <span className="text-right">
                     £{Math.round(sector.median_price).toLocaleString()}
                     {sector.median_price_adj ?? sector.inflation_adjusted_price ? (
@@ -550,21 +718,6 @@ export default function App() {
             <div className="mt-3 space-y-3">
               <div>
                 <label className="text-xs text-slate-600">
-                  Max Commute (mins): <span className="font-semibold">{filters.maxCommute}</span>
-                </label>
-                <input
-                  className="mt-2 w-full"
-                  type="range"
-                  min={10}
-                  max={180}
-                  step={5}
-                  value={filters.maxCommute}
-                  disabled
-                  onChange={(e) => setFilters({ ...filters, maxCommute: Number(e.target.value) })}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-600">
                   Min Schools Score: <span className="font-semibold">{filters.minSchools}</span>
                 </label>
                 <input
@@ -606,7 +759,7 @@ export default function App() {
               showHeatmap={showHeatmap}
               showCentroids={showCentroids}
               showBestFit={showBestFit}
-              affordability={affordability}
+              affordability={{ ...affordability, ...commute }}
               maxAffordable={maxAffordable}
               propertyType={propertyType}
               selectedSector={selectedSector}

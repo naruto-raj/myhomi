@@ -38,6 +38,15 @@ export type SectorStat = {
   longitude: number;
   score?: number;
   inflation_adjusted_price?: number | null;
+  commute_minutes?: number | null;
+  commute_cost_monthly?: number | null;
+  mortgage_monthly?: number | null;
+  total_monthly_cost?: number | null;
+  total_monthly_cost_adjusted?: number | null;
+  budget_remaining?: number | null;
+  effective_monthly_budget?: number | null;
+  affordability_cap_adjusted?: number | null;
+  affordability_ratio?: number | null;
 };
 
 export type PropertyTypeRange = {
@@ -124,7 +133,13 @@ export function fetchNearestAffordablePostcode(
   lat: number,
   lng: number,
   affordability: { monthlyBudget: number; deposit: number; mortgageRate: number; termYears: number },
-  propertyType?: string
+  propertyType?: string,
+  commute?: {
+    workplacePostcode?: string | null;
+    commuteMode?: string | null;
+    commuteDaysPerWeek?: number | null;
+    commuteCostSensitivity?: number | null;
+  }
 ) {
   const params = new URLSearchParams({
     lat: String(lat),
@@ -134,6 +149,18 @@ export function fetchNearestAffordablePostcode(
     mortgageRate: String(affordability.mortgageRate ?? 0),
     termYears: String(affordability.termYears ?? 0),
   });
+  if (commute?.workplacePostcode) {
+    params.set("workplacePostcode", commute.workplacePostcode);
+  }
+  if (commute?.commuteMode) {
+    params.set("commuteMode", commute.commuteMode);
+  }
+  if (Number.isFinite(commute?.commuteDaysPerWeek ?? NaN)) {
+    params.set("commuteDaysPerWeek", String(commute?.commuteDaysPerWeek ?? 0));
+  }
+  if (Number.isFinite(commute?.commuteCostSensitivity ?? NaN)) {
+    params.set("commuteCostSensitivity", String(commute?.commuteCostSensitivity ?? 0));
+  }
   if (propertyType && propertyType !== "ALL") {
     params.set("propertyType", propertyType);
   }
@@ -154,6 +181,20 @@ export function fetchNearestAffordablePostcode(
       inflation_adjusted_price?: number | null;
       inflation_percent_change?: number | null;
       affordability_cap?: number | null;
+      commute?: {
+        mode?: string | null;
+        duration_sec?: number | null;
+        distance_km?: number | null;
+        cost_monthly?: number | null;
+        days_per_week?: number | null;
+        cost_per_km?: number | null;
+        effective_monthly_budget?: number | null;
+        affordability_cap_adjusted?: number | null;
+      } | null;
+      mortgage_monthly?: number | null;
+      total_monthly_cost?: number | null;
+      budget_remaining?: number | null;
+      price_for_mortgage?: number | null;
     } | null;
   }>(`/api/postcode/nearest-affordable?${params.toString()}`);
 }
@@ -166,6 +207,10 @@ export function fetchSectorRankings(payload: {
     deposit: number;
     mortgageRate: number;
     termYears: number;
+    workplacePostcode?: string | null;
+    commuteMode?: string | null;
+    commuteDaysPerWeek?: number | null;
+    commuteCostSensitivity?: number | null;
   };
   filters: {
     maxCommute: number;
@@ -185,6 +230,17 @@ export function fetchSectorRankings(payload: {
       inflation_latest_index?: number | null;
       inflation_factor?: number | null;
       type_ranges?: PropertyTypeRange[];
+      commute?: {
+        mode?: string | null;
+        days_per_week?: number | null;
+        cost_per_km?: number | null;
+        destination?: {
+          postcode?: string;
+          latitude?: number;
+          longitude?: number;
+        } | null;
+        error?: string | null;
+      } | null;
     } | null;
   }>(`/api/sector-rankings`, {
     method: "POST",
@@ -201,6 +257,10 @@ export function fetchAffordableHeatmap(payload: {
     deposit: number;
     mortgageRate: number;
     termYears: number;
+    workplacePostcode?: string | null;
+    commuteMode?: string | null;
+    commuteDaysPerWeek?: number | null;
+    commuteCostSensitivity?: number | null;
   };
   propertyType?: string;
   limit?: number;

@@ -63,6 +63,12 @@ DATA_DIR=../data
 PORT=5050
 CORS_ORIGIN=http://localhost:5173
 ZOOM_THRESHOLD=8
+ORS_API_KEY=<openrouteservice_api_key>
+COMMUTE_COST_PER_KM=0.35
+COMMUTE_DAYS_PER_WEEK=5
+COMMUTE_CACHE_TTL_DAYS=30
+COMMUTE_MAX_ORIGINS=120
+COMMUTE_BATCH_SIZE=50
 ```
 
 Example root `.env`:
@@ -82,10 +88,29 @@ VITE_ZOOM_THRESHOLD=8
 
 ## Backlog (TBD Adapters)
 The following adapters exist as placeholders and are not wired up yet:
-- `server/src/adapters/commute.js`
 - `server/src/adapters/crime.js`
 - `server/src/adapters/landRegistry.js`
 - `server/src/adapters/schools.js`
+
+## Commute MVP (OpenRouteService)
+- Requires `ORS_API_KEY` in `server/.env`.
+- Commute costs are estimated using distance and `COMMUTE_COST_PER_KM`.
+- Commute cache is stored in `commute_cache` (auto-created on first request).
+- Public transport mode currently uses driving-time as a fallback in the MVP.
+
+## Commute Data (Current)
+- Travel time + distance: OpenRouteService matrix API (sector centroids → workplace postcode).
+- Cost model: `distance_km × COMMUTE_COST_PER_KM × days_per_week × 2 × 4.33`.
+- Cost sensitivity: user-provided factor (0–1) applied to reduce effective budget.
+- Cache: `commute_cache` with TTL via `COMMUTE_CACHE_TTL_DAYS`.
+
+## Commute Backlog
+- Real public transport routing (replace driving fallback).
+- Actual fare integration (TfL/rail) instead of distance-only estimate.
+- Peak/off-peak pricing and time-of-day commute windows.
+- Reliability metrics (variance / percentile travel time).
+- Multi-destination commutes (work + school).
+- Optional carbon/eco scoring.
 
 ## Key APIs
 - Postcode lookup: `GET /api/postcode?postcode=SW1A1AA`

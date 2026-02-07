@@ -16,6 +16,10 @@ type Props = {
     deposit: number;
     mortgageRate: number;
     termYears: number;
+    workplacePostcode?: string | null;
+    commuteMode?: string | null;
+    commuteDaysPerWeek?: number | null;
+    commuteCostSensitivity?: number | null;
   };
   maxAffordable?: number;
   propertyType?: string;
@@ -169,7 +173,12 @@ export default function MapView({
       const propertyTypeValue = propertyTypeRef.current;
       if (showBestFitRef.current && affordabilityValue) {
         try {
-          result = await fetchNearestAffordablePostcode(lat, lng, affordabilityValue, propertyTypeValue);
+          result = await fetchNearestAffordablePostcode(lat, lng, affordabilityValue, propertyTypeValue, {
+            workplacePostcode: affordabilityValue.workplacePostcode,
+            commuteMode: affordabilityValue.commuteMode,
+            commuteDaysPerWeek: affordabilityValue.commuteDaysPerWeek,
+            commuteCostSensitivity: affordabilityValue.commuteCostSensitivity,
+          });
           label = options?.label || "Nearest Affordable Sale";
         } catch {
           result = await fetchNearestPostcode(lat, lng);
@@ -205,6 +214,17 @@ export default function MapView({
       const latestYear = result.meta?.inflation_latest_year ?? null;
       const baseIndex = result.meta?.inflation_base_index ?? null;
       const latestIndex = result.meta?.inflation_latest_index ?? null;
+      const commute = result.meta?.commute ?? null;
+      const commuteMinutes = commute?.duration_sec ? Math.round(commute.duration_sec / 60) : null;
+      const commuteDistance = Number.isFinite(commute?.distance_km ?? NaN)
+        ? Number(commute?.distance_km).toFixed(1)
+        : null;
+      const commuteCost = commute?.cost_monthly ?? null;
+      const mortgageMonthly = result.meta?.mortgage_monthly ?? null;
+      const totalMonthlyCost = result.meta?.total_monthly_cost ?? null;
+      const budgetRemaining = result.meta?.budget_remaining ?? null;
+      const effectiveBudget = commute?.effective_monthly_budget ?? null;
+      const affordabilityCapAdjusted = commute?.affordability_cap_adjusted ?? null;
       const propertyTypeCode = row?.property_type ?? null;
       const propertyTypeLabel =
         propertyTypeCode === "D"
@@ -239,6 +259,58 @@ export default function MapView({
         baseYear && latestYear && baseIndex && latestIndex
           ? `CPIH 2015=100: ${baseYear} ${baseIndex} → ${latestYear} ${latestIndex}`
           : "CPIH data unavailable";
+
+      const commuteLine =
+        commuteMinutes !== null || commuteCost !== null || commuteDistance !== null || totalMonthlyCost !== null
+          ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+              <span>Commute</span>
+              <span style="color:#0f172a;font-weight:600;">
+                ${commuteMinutes !== null ? `${commuteMinutes} min` : "—"}
+                ${commuteDistance !== null ? ` · ${commuteDistance} km` : ""}
+                ${commuteCost !== null ? ` · £${Math.round(commuteCost).toLocaleString()}/mo` : ""}
+              </span>
+            </div>
+            ${
+              mortgageMonthly !== null
+                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                    <span>Mortgage / mo</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(mortgageMonthly).toLocaleString()}</span>
+                  </div>`
+                : ""
+            }
+            ${
+              totalMonthlyCost !== null
+                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                    <span>Total monthly cost</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(totalMonthlyCost).toLocaleString()}</span>
+                  </div>`
+                : ""
+            }
+            ${
+              budgetRemaining !== null
+                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                    <span>Budget remaining</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(budgetRemaining).toLocaleString()}</span>
+                  </div>`
+                : ""
+            }
+            ${
+              effectiveBudget !== null
+                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                    <span>Effective budget</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(effectiveBudget).toLocaleString()}</span>
+                  </div>`
+                : ""
+            }
+            ${
+              affordabilityCapAdjusted !== null
+                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                    <span>Adj. affordability</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(affordabilityCapAdjusted).toLocaleString()}</span>
+                  </div>`
+                : ""
+            }`
+          : "";
 
       const sectorLine =
         options?.sectorMedian || options?.sectorMedianAdj
@@ -287,6 +359,7 @@ export default function MapView({
 
             <div style="margin-top:10px; display:grid; grid-template-columns:1fr; gap:6px;">
               ${sectorLine}
+              ${commuteLine}
               <div style="font-size:10px; color:#94a3b8;">${inflationMeta}</div>
             </div>
           </div>
