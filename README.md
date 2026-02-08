@@ -32,6 +32,29 @@ first_csv=$(find /tmp/ons_postcodes -type f -name "*.csv" | head -n 1)
 cp "$first_csv" /Users/naveenrajg/Documents/VibeCoding/housing-map/data/postcode-directory/ons_postcode_directory.csv
 ```
 
+### Council Tax Band D (England)
+Download the ODS (Band D) and place it at:
+`data/Band_D_2025-26.ods`
+
+Then convert + ingest:
+```bash
+python3 server/scripts/convert-council-tax-ods.py
+docker compose run --rm server sh -lc "node scripts/ingest-council-tax.js"
+```
+
+### Council Tax Band D (Wales)
+Download the XLSX and place it at:
+`data/council-tax-levels-in-wales-2025-26.xlsx`
+
+Download the LAD lookup (UK, April 2025) and place it at:
+`data/Local_Authority_Districts_(April_2025)_Names_and_Codes_in_the_UK_v2.csv`
+
+Convert + ingest:
+```bash
+python3 server/scripts/convert-council-tax-wales-xlsx.py
+docker compose run --rm server sh -lc "COUNCIL_TAX_CSV=../data/council_tax_band_d_wales_2025_26.csv node scripts/ingest-council-tax.js"
+```
+
 ## Docker Data Ingest
 ```bash
 # Price Paid (fast mode)
@@ -39,6 +62,9 @@ docker compose run --rm server sh -lc "PRICE_PAID_FAST=true PRICE_PAID_TRUNCATE=
 
 # ONS Postcode Directory
 docker compose run --rm server sh -lc "node scripts/ingest-postcodes.js"
+
+# Council Tax (Band D)
+docker compose run --rm server sh -lc "node scripts/ingest-council-tax.js"
 
 # Compute sector stats
 docker compose run --rm server sh -lc "node scripts/compute-sector-stats.js"

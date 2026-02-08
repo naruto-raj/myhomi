@@ -92,6 +92,19 @@ export function fetchPricePaidByPostcode(postcode: string, limit = 50) {
   return json<{ rows: PricePaidPoint[] }>(`/api/price-paid?${params.toString()}`);
 }
 
+export function fetchCouncilTax(postcode: string) {
+  const params = new URLSearchParams({ postcode });
+  return json<{
+    row: {
+      lad_code: string;
+      lad_name?: string | null;
+      year: number;
+      band_d_annual: number;
+    };
+    monthly_estimate: number | null;
+  }>(`/api/council-tax?${params.toString()}`);
+}
+
 export function fetchPostcodeLatest(postcode: string) {
   const params = new URLSearchParams({ postcode });
   return json<{

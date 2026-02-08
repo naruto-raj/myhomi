@@ -23,10 +23,13 @@ const pool = new Pool({ connectionString: databaseUrl });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const schemaPath = path.join(__dirname, "..", "sql", "postcode_coords_schema.sql");
+const ladSchemaPath = path.join(__dirname, "..", "sql", "postcode_lad_schema.sql");
 
 async function ensureSchema() {
   const sql = fs.readFileSync(schemaPath, "utf-8");
   await pool.query(sql);
+  const ladSql = fs.readFileSync(ladSchemaPath, "utf-8");
+  await pool.query(ladSql);
 }
 
 function findColumnIndex(headers, candidates) {
@@ -59,6 +62,7 @@ async function ingest() {
     let postcodeIdx = -1;
     let latIdx = -1;
     let lonIdx = -1;
+    let ladIdx = -1;
 
     for await (const record of parser) {
       if (!headers) {
@@ -66,6 +70,7 @@ async function ingest() {
         postcodeIdx = findColumnIndex(headers, ["pcds", "pcd", "postcode"]);
         latIdx = findColumnIndex(headers, ["lat", "latitude"]);
         lonIdx = findColumnIndex(headers, ["long", "longitude", "lon", "lng"]);
+        ladIdx = findColumnIndex(headers, ["lad25cd", "ladcd"]);
 
         if (postcodeIdx === -1 || latIdx === -1 || lonIdx === -1) {
           throw new Error(
@@ -78,6 +83,7 @@ async function ingest() {
       const postcode = String(record[postcodeIdx] || "").trim();
       const lat = Number(record[latIdx]);
       const lon = Number(record[lonIdx]);
+      const ladCode = ladIdx >= 0 ? String(record[ladIdx] || "").trim() : "";
 
       if (!postcode || !Number.isFinite(lat) || !Number.isFinite(lon)) {
         continue;
@@ -98,6 +104,19 @@ async function ingest() {
         `,
         [postcode, postcodeNorm, lat, lon]
       );
+
+      if (ladCode) {
+        await client.query(
+          `
+            INSERT INTO postcode_lad (
+              postcode_norm,
+              lad_code
+            ) VALUES ($1, $2)
+            ON CONFLICT (postcode_norm) DO UPDATE SET lad_code = EXCLUDED.lad_code;
+          `,
+          [postcodeNorm, ladCode]
+        );
+      }
 
       count += 1;
       if (count % 5000 === 0) {

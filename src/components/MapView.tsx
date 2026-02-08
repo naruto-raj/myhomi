@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import type { AffordableHeatmapPoint, PricePaidPoint, SectorStat } from "../api/client";
-import { fetchNearestAffordablePostcode, fetchNearestPostcode } from "../api/client";
+import { fetchCouncilTax, fetchNearestAffordablePostcode, fetchNearestPostcode } from "../api/client";
 
 type Props = {
   pricePaidPoints: PricePaidPoint[];
@@ -11,6 +11,7 @@ type Props = {
   showHeatmap: boolean;
   showCentroids: boolean;
   showBestFit: boolean;
+  councilTaxMonthly?: number;
   affordability?: {
     monthlyBudget: number;
     deposit: number;
@@ -24,6 +25,7 @@ type Props = {
   maxAffordable?: number;
   propertyType?: string;
   selectedSector?: SectorStat | null;
+  onCouncilTaxUpdate?: (postcode: string) => void;
   onViewportChange?: (bbox: number[], zoom: number) => void;
   focusPoint?: { latitude: number; longitude: number } | null;
 };
@@ -41,6 +43,8 @@ export default function MapView({
   maxAffordable,
   propertyType,
   selectedSector,
+  councilTaxMonthly = 0,
+  onCouncilTaxUpdate,
   onViewportChange,
   focusPoint,
 }: Props) {
@@ -190,6 +194,20 @@ export default function MapView({
 
       if (!result) return;
       const row = result.row;
+      let councilTaxForPostcode = councilTaxMonthly;
+      if (row?.postcode) {
+        if (onCouncilTaxUpdate) {
+          onCouncilTaxUpdate(row.postcode);
+        }
+        try {
+          const ct = await fetchCouncilTax(row.postcode);
+          if (Number.isFinite(ct?.monthly_estimate ?? NaN)) {
+            councilTaxForPostcode = ct.monthly_estimate ?? councilTaxMonthly;
+          }
+        } catch {
+          // keep current value
+        }
+      }
       const targetLat = row?.latitude ?? lat;
       const targetLng = row?.longitude ?? lng;
       const rawDate = row?.date_of_transfer ? String(row.date_of_transfer) : "";
@@ -223,6 +241,11 @@ export default function MapView({
       const mortgageMonthly = result.meta?.mortgage_monthly ?? null;
       const totalMonthlyCost = result.meta?.total_monthly_cost ?? null;
       const budgetRemaining = result.meta?.budget_remaining ?? null;
+      const councilTax = Number.isFinite(councilTaxForPostcode) ? councilTaxForPostcode : 0;
+      const allInMonthly =
+        totalMonthlyCost !== null ? Math.round(totalMonthlyCost + councilTax) : null;
+      const budgetRemainingAllIn =
+        budgetRemaining !== null ? Math.round(budgetRemaining - councilTax) : null;
       const propertyTypeCode = row?.property_type ?? null;
       const propertyTypeLabel =
         propertyTypeCode === "D"
@@ -283,23 +306,31 @@ export default function MapView({
                 : ""
             }
             ${
-              totalMonthlyCost !== null
+              councilTax > 0
                 ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>Total monthly cost</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(totalMonthlyCost).toLocaleString()}</span>
+                    <span>Council tax (est. / mo)</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(councilTax).toLocaleString()}</span>
                   </div>`
                 : ""
             }
             ${
-              budgetRemaining !== null
+              allInMonthly !== null
+                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
+                    <span>All-in monthly</span>
+                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(allInMonthly).toLocaleString()}</span>
+                  </div>`
+                : ""
+            }
+            ${
+              budgetRemainingAllIn !== null
                 ? (() => {
-                    const isPositive = Number(budgetRemaining) >= 0;
+                    const isPositive = Number(budgetRemainingAllIn) >= 0;
                     const arrow = isPositive ? "▲" : "▼";
                     const color = isPositive ? "#16a34a" : "#dc2626";
                     return `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
                       <span>Budget remaining</span>
                       <span style=\"color:${color};font-weight:700;display:inline-flex;align-items:center;gap:6px;\">
-                        ${arrow} £${Math.abs(Math.round(budgetRemaining)).toLocaleString()}
+                        ${arrow} £${Math.abs(Math.round(budgetRemainingAllIn)).toLocaleString()}
                       </span>
                     </div>`;
                   })()

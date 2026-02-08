@@ -478,6 +478,41 @@ app.get("/api/postcode", async (req, res) => {
   }
 });
 
+app.get("/api/council-tax", async (req, res) => {
+  try {
+    const postcode = String(req.query.postcode || "").trim();
+    if (!postcode) {
+      return res.status(400).json({ error: "postcode is required" });
+    }
+    const postcodeNorm = postcode.replace(/\s+/g, "").toUpperCase();
+    const { rows } = await pool.query(
+      `
+        SELECT
+          ct.lad_code,
+          ct.lad_name,
+          ct.year,
+          ct.band_d_annual
+        FROM postcode_lad pl
+        JOIN council_tax_band_d ct
+          ON ct.lad_code = pl.lad_code
+        WHERE pl.postcode_norm = $1
+        LIMIT 1;
+      `,
+      [postcodeNorm]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: "council tax not found for postcode" });
+    }
+    const row = rows[0];
+    res.json({
+      row,
+      monthly_estimate: row.band_d_annual ? Math.round(Number(row.band_d_annual) / 12) : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch council tax" });
+  }
+});
+
 app.post("/api/sector-rankings", rateLimit, async (req, res) => {
   try {
     const {

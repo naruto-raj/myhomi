@@ -3,6 +3,7 @@ import {
   fetchPostcodeLocation,
   fetchPricePaidByPostcode,
   fetchPricePaidViewport,
+  fetchCouncilTax,
   fetchAffordableHeatmap,
   fetchSectorRankings,
   PricePaidPoint,
@@ -32,6 +33,52 @@ function computeMaxAffordable({
       : (monthlyBudget * (Math.pow(1 + monthlyRate, n) - 1)) /
         (monthlyRate * Math.pow(1 + monthlyRate, n));
   return Math.max(loan, 0) + deposit;
+}
+
+function computeSdltStandard(price: number) {
+  const bands = [
+    { upTo: 125000, rate: 0 },
+    { upTo: 250000, rate: 0.02 },
+    { upTo: 925000, rate: 0.05 },
+    { upTo: 1500000, rate: 0.1 },
+    { upTo: Infinity, rate: 0.12 },
+  ];
+  let remaining = Math.max(price, 0);
+  let prev = 0;
+  let total = 0;
+  for (const band of bands) {
+    const taxable = Math.min(remaining, band.upTo - prev);
+    if (taxable > 0) {
+      total += taxable * band.rate;
+      remaining -= taxable;
+    }
+    prev = band.upTo;
+    if (remaining <= 0) break;
+  }
+  return Math.round(total);
+}
+
+function computeSdltFirstTimeBuyer(price: number) {
+  if (price > 500000) {
+    return computeSdltStandard(price);
+  }
+  const bands = [
+    { upTo: 300000, rate: 0 },
+    { upTo: 500000, rate: 0.05 },
+  ];
+  let remaining = Math.max(price, 0);
+  let prev = 0;
+  let total = 0;
+  for (const band of bands) {
+    const taxable = Math.min(remaining, band.upTo - prev);
+    if (taxable > 0) {
+      total += taxable * band.rate;
+      remaining -= taxable;
+    }
+    prev = band.upTo;
+    if (remaining <= 0) break;
+  }
+  return Math.round(total);
 }
 
 function bboxEquals(a: number[] | null, b: number[] | null) {
@@ -83,6 +130,17 @@ export default function App() {
     mortgageRate: 4.5,
     termYears: 25,
   });
+  const [councilTaxMonthly, setCouncilTaxMonthly] = useState(150);
+  const [purchasePrice, setPurchasePrice] = useState(350000);
+  const [purchasePriceTouched, setPurchasePriceTouched] = useState(false);
+  const [fees, setFees] = useState({
+    legal: 1500,
+    survey: 600,
+    mortgage: 1000,
+    moving: 300,
+    other: 0,
+  });
+  const [isFirstTimeBuyer, setIsFirstTimeBuyer] = useState(true);
   const [commute, setCommute] = useState({
     workplacePostcode: "",
     commuteMode: "PUBLIC",
@@ -120,6 +178,36 @@ export default function App() {
   const maxAffordable = useMemo(
     () => computeMaxAffordable(affordability),
     [affordability]
+  );
+
+  useEffect(() => {
+    if (!purchasePriceTouched) {
+      setPurchasePrice(Math.round(maxAffordable));
+    }
+  }, [maxAffordable, purchasePriceTouched]);
+
+  const stampDuty = useMemo(() => {
+    if (!Number.isFinite(purchasePrice)) return 0;
+    return isFirstTimeBuyer
+      ? computeSdltFirstTimeBuyer(purchasePrice)
+      : computeSdltStandard(purchasePrice);
+  }, [purchasePrice, isFirstTimeBuyer]);
+
+  const totalFees = useMemo(
+    () =>
+      Math.round(
+        (Number(fees.legal) || 0) +
+          (Number(fees.survey) || 0) +
+          (Number(fees.mortgage) || 0) +
+          (Number(fees.moving) || 0) +
+          (Number(fees.other) || 0)
+      ),
+    [fees]
+  );
+
+  const totalCashNeeded = useMemo(
+    () => Math.max(0, Math.round(affordability.deposit + stampDuty + totalFees)),
+    [affordability.deposit, stampDuty, totalFees]
   );
 
   const viewportNotice = viewportLoading
@@ -266,6 +354,16 @@ export default function App() {
     return rows;
   }, [sectors, bestFitSort]);
 
+  const loadCouncilTax = (postcode: string) => {
+    fetchCouncilTax(postcode)
+      .then((councilTax) => {
+        if (Number.isFinite(councilTax?.monthly_estimate ?? NaN)) {
+          setCouncilTaxMonthly(councilTax.monthly_estimate ?? 0);
+        }
+      })
+      .catch(() => {});
+  };
+
   const handlePostcodeSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!postcodeQuery.trim()) return;
@@ -273,9 +371,10 @@ export default function App() {
     fetchPostcodeLocation(postcodeQuery)
       .then((data) => {
         setPostcodeLocation({ latitude: data.location.latitude, longitude: data.location.longitude });
+        loadCouncilTax(postcodeQuery);
         return fetchPricePaidByPostcode(postcodeQuery, 100);
       })
-      .then((data) => setPostcodeResults(data.rows))
+      .then((priceData) => setPostcodeResults(priceData.rows))
       .catch((err) => {
         setPostcodeError(err.message || "Postcode not found");
         setPostcodeLocation(null);
@@ -474,6 +573,121 @@ export default function App() {
                   <p className="mt-2 text-[10px] text-slate-500">
                     Commute cost reduces affordability based on sensitivity. Public transport uses driving time in the MVP.
                   </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Upfront costs</p>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="text-xs text-slate-600">Target purchase price</label>
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          type="number"
+                          min={0}
+                          step={5000}
+                          value={purchasePrice}
+                          onChange={(e) => {
+                            setPurchasePriceTouched(true);
+                            setPurchasePrice(Number(e.target.value));
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="rounded-xl border border-emerald-500 bg-emerald-500/20 px-3 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-500/30"
+                          onClick={() => {
+                            setPurchasePriceTouched(false);
+                            setPurchasePrice(Math.round(maxAffordable));
+                          }}
+                        >
+                          Use max
+                        </button>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={isFirstTimeBuyer}
+                        onChange={(e) => setIsFirstTimeBuyer(e.target.checked)}
+                      />
+                      First-time buyer relief
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-600">Legal fees</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          type="number"
+                          min={0}
+                          step={50}
+                          value={fees.legal}
+                          onChange={(e) => setFees({ ...fees, legal: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-600">Survey</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          type="number"
+                          min={0}
+                          step={50}
+                          value={fees.survey}
+                          onChange={(e) => setFees({ ...fees, survey: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-600">Mortgage fees</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          type="number"
+                          min={0}
+                          step={50}
+                          value={fees.mortgage}
+                          onChange={(e) => setFees({ ...fees, mortgage: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-600">Moving</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                          type="number"
+                          min={0}
+                          step={50}
+                          value={fees.moving}
+                          onChange={(e) => setFees({ ...fees, moving: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-600">Other costs</label>
+                      <input
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                        type="number"
+                        min={0}
+                        step={50}
+                        value={fees.other}
+                        onChange={(e) => setFees({ ...fees, other: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                      <div className="flex items-center justify-between">
+                        <span>Stamp duty</span>
+                        <span className="font-semibold">£{stampDuty.toLocaleString()}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between">
+                        <span>Fees total</span>
+                        <span className="font-semibold">£{totalFees.toLocaleString()}</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-sm text-slate-900">
+                        <span>Total cash needed</span>
+                        <span className="font-semibold">£{totalCashNeeded.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {isFirstTimeBuyer && purchasePrice > 500000 && (
+                      <p className="text-[10px] text-rose-500">
+                        First-time buyer relief applies only up to £500k; standard rates used above.
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs text-slate-600">Property type</label>
@@ -677,6 +891,11 @@ export default function App() {
                           Total monthly (adj): £{Math.round(sector.total_monthly_cost_adjusted).toLocaleString()}
                         </span>
                       )}
+                      {sector.total_monthly_cost != null && councilTaxMonthly > 0 && (
+                        <span className="block text-[10px] text-slate-500">
+                          All-in monthly: £{Math.round(sector.total_monthly_cost + councilTaxMonthly).toLocaleString()}
+                        </span>
+                      )}
                       {sector.effective_monthly_budget != null && (
                         <span className="block text-[10px] text-slate-500">
                           Effective budget: £{Math.round(sector.effective_monthly_budget).toLocaleString()}
@@ -787,6 +1006,8 @@ export default function App() {
               maxAffordable={maxAffordable}
               propertyType={propertyType}
               selectedSector={selectedSector}
+              councilTaxMonthly={councilTaxMonthly}
+              onCouncilTaxUpdate={loadCouncilTax}
               onViewportChange={handleViewportChange}
               focusPoint={postcodeLocation}
             />
