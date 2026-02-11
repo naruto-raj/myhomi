@@ -35,6 +35,40 @@ function computeMaxAffordable({
   return Math.max(loan, 0) + deposit;
 }
 
+function computeMonthlyPaymentFromPrincipal({
+  principal,
+  mortgageRate,
+  termYears,
+}: {
+  principal: number;
+  mortgageRate: number;
+  termYears: number;
+}) {
+  const monthlyRate = mortgageRate / 100 / 12;
+  const n = termYears * 12;
+  if (n <= 0) return 0;
+  if (monthlyRate === 0) return principal / n;
+  const pow = Math.pow(1 + monthlyRate, n);
+  return principal * (monthlyRate * pow) / (pow - 1);
+}
+
+function computePrincipalFromMonthly({
+  monthlyBudget,
+  mortgageRate,
+  termYears,
+}: {
+  monthlyBudget: number;
+  mortgageRate: number;
+  termYears: number;
+}) {
+  const monthlyRate = mortgageRate / 100 / 12;
+  const n = termYears * 12;
+  if (n <= 0) return 0;
+  if (monthlyRate === 0) return monthlyBudget * n;
+  return (monthlyBudget * (Math.pow(1 + monthlyRate, n) - 1)) /
+    (monthlyRate * Math.pow(1 + monthlyRate, n));
+}
+
 function computeSdltStandard(price: number) {
   const bands = [
     { upTo: 125000, rate: 0 },
@@ -125,11 +159,13 @@ export default function App() {
   });
   const [propertyType, setPropertyType] = useState("ALL");
   const [affordability, setAffordability] = useState({
+    incomeAnnual: 60000,
     monthlyBudget: 1200,
     deposit: 30000,
     mortgageRate: 4.5,
     termYears: 25,
   });
+  const [monthlyBudgetTouched, setMonthlyBudgetTouched] = useState(false);
   const [councilTaxMonthly, setCouncilTaxMonthly] = useState(150);
   const [purchasePrice, setPurchasePrice] = useState(350000);
   const [purchasePriceTouched, setPurchasePriceTouched] = useState(false);
@@ -179,6 +215,50 @@ export default function App() {
     () => computeMaxAffordable(affordability),
     [affordability]
   );
+
+  const incomeMortgagePrincipal = useMemo(() => {
+    const income = Number(affordability.incomeAnnual ?? 0);
+    return income > 0 ? income * 4 : 0;
+  }, [affordability.incomeAnnual]);
+
+  const incomeMaxMonthly = useMemo(() => {
+    if (!incomeMortgagePrincipal) return 0;
+    return computeMonthlyPaymentFromPrincipal({
+      principal: incomeMortgagePrincipal,
+      mortgageRate: affordability.mortgageRate,
+      termYears: affordability.termYears,
+    });
+  }, [incomeMortgagePrincipal, affordability.mortgageRate, affordability.termYears]);
+
+  const incomeMaxMonthlyHard = useMemo(() => incomeMaxMonthly * 1.2, [incomeMaxMonthly]);
+  const incomeDefaultMonthly = useMemo(() => incomeMaxMonthly * 0.8, [incomeMaxMonthly]);
+  const bankCapPurchasePrice = useMemo(
+    () => incomeMortgagePrincipal + Math.max(affordability.deposit || 0, 0),
+    [incomeMortgagePrincipal, affordability.deposit]
+  );
+  const depositPctOfBankCap = useMemo(() => {
+    if (!bankCapPurchasePrice) return 0;
+    return (Math.max(affordability.deposit || 0, 0) / bankCapPurchasePrice) * 100;
+  }, [bankCapPurchasePrice, affordability.deposit]);
+  const bankCapMonthlyGap = useMemo(() => {
+    if (!incomeMaxMonthly) return null;
+    return affordability.monthlyBudget - incomeMaxMonthly;
+  }, [affordability.monthlyBudget, incomeMaxMonthly]);
+
+  useEffect(() => {
+    if (!Number.isFinite(incomeMaxMonthly) || incomeMaxMonthly <= 0) return;
+    setAffordability((prev) => {
+      let nextBudget = prev.monthlyBudget;
+      if (!monthlyBudgetTouched) {
+        nextBudget = Math.round(incomeDefaultMonthly);
+      }
+      if (Number.isFinite(incomeMaxMonthlyHard) && nextBudget > incomeMaxMonthlyHard) {
+        nextBudget = Math.round(incomeMaxMonthlyHard);
+      }
+      if (nextBudget === prev.monthlyBudget) return prev;
+      return { ...prev, monthlyBudget: nextBudget };
+    });
+  }, [incomeDefaultMonthly, incomeMaxMonthly, incomeMaxMonthlyHard, monthlyBudgetTouched]);
 
   useEffect(() => {
     if (!purchasePriceTouched) {
@@ -457,6 +537,19 @@ export default function App() {
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Affordability</p>
               <div className="mt-4 space-y-4">
                 <div>
+                  <label className="text-xs text-slate-600">Annual Income (£)</label>
+                  <input
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    type="number"
+                    min={0}
+                    step={1000}
+                    value={affordability.incomeAnnual}
+                    onChange={(e) =>
+                      setAffordability({ ...affordability, incomeAnnual: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div>
                   <label className="text-xs text-slate-600">Monthly Budget (£)</label>
                   <input
                     className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
@@ -464,10 +557,32 @@ export default function App() {
                     min={300}
                     step={50}
                     value={affordability.monthlyBudget}
-                    onChange={(e) =>
-                      setAffordability({ ...affordability, monthlyBudget: Number(e.target.value) })
-                    }
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      const capped =
+                        Number.isFinite(incomeMaxMonthlyHard) && incomeMaxMonthlyHard > 0
+                          ? Math.min(next, incomeMaxMonthlyHard)
+                          : next;
+                      setMonthlyBudgetTouched(true);
+                      setAffordability({ ...affordability, monthlyBudget: capped });
+                    }}
                   />
+                  {incomeMaxMonthly > 0 && (
+                    <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+                      <div>
+                        Bank cap (4× income): £{Math.round(incomeMortgagePrincipal).toLocaleString()} loan ·
+                        max £{Math.round(incomeMaxMonthly).toLocaleString()}/mo
+                      </div>
+                      <div>
+                        Hard cap 120%: £{Math.round(incomeMaxMonthlyHard).toLocaleString()}/mo · default 80%
+                      </div>
+                    </div>
+                  )}
+                  {incomeMaxMonthly > 0 && affordability.monthlyBudget > incomeMaxMonthly && (
+                    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Above pay grade (&gt;{Math.round((affordability.monthlyBudget / incomeMaxMonthly) * 100)}% of bank cap)
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs text-slate-600">Deposit (£)</label>
@@ -507,8 +622,29 @@ export default function App() {
                   </div>
                 </div>
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-                  Max affordable price: £{Math.round(maxAffordable).toLocaleString()}
+                  Budget-based max price: £{Math.round(maxAffordable).toLocaleString()}
                 </div>
+                {incomeMaxMonthly > 0 && (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-900">
+                        Bank-cap purchase: £{Math.round(bankCapPurchasePrice).toLocaleString()}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                        Deposit {depositPctOfBankCap.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="mt-2 text-[11px] text-slate-500">
+                      Mortgage / mo at bank cap: £{Math.round(incomeMaxMonthly).toLocaleString()}
+                      {bankCapMonthlyGap !== null && (
+                        <span className="ml-2">
+                          · Budget {bankCapMonthlyGap >= 0 ? "▲" : "▼"} £
+                          {Math.abs(Math.round(bankCapMonthlyGap)).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Commute</p>
                   <div className="mt-3 space-y-3">

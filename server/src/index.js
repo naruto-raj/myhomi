@@ -113,6 +113,35 @@ function computeMonthlyMortgagePayment({ price, deposit, mortgageRate, termYears
   return principal * (monthlyRate * pow) / (pow - 1);
 }
 
+function computeMonthlyPaymentFromPrincipal({ principal, mortgageRate, termYears }) {
+  const monthlyRate = safeNumber(mortgageRate) / 100 / 12;
+  const n = safeNumber(termYears) * 12;
+  if (n <= 0) return 0;
+  if (monthlyRate === 0) return safeNumber(principal) / n;
+  const pow = Math.pow(1 + monthlyRate, n);
+  return safeNumber(principal) * (monthlyRate * pow) / (pow - 1);
+}
+
+function applyIncomeCap(affordability) {
+  const incomeAnnual = safeNumber(affordability?.incomeAnnual);
+  if (!Number.isFinite(incomeAnnual) || incomeAnnual <= 0) {
+    return { ...affordability };
+  }
+  const principalCap = incomeAnnual * 4;
+  const maxMonthly = computeMonthlyPaymentFromPrincipal({
+    principal: principalCap,
+    mortgageRate: affordability?.mortgageRate,
+    termYears: affordability?.termYears,
+  });
+  const hardCap = maxMonthly * 1.2;
+  const monthlyBudget = safeNumber(affordability?.monthlyBudget);
+  const cappedMonthly = Number.isFinite(hardCap) && hardCap > 0 ? Math.min(monthlyBudget, hardCap) : monthlyBudget;
+  return {
+    ...affordability,
+    monthlyBudget: cappedMonthly,
+  };
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
@@ -247,14 +276,16 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
       deposit: Number(req.query.deposit ?? 0),
       mortgageRate: Number(req.query.mortgageRate ?? 0),
       termYears: Number(req.query.termYears ?? 0),
+      incomeAnnual: Number(req.query.incomeAnnual ?? 0),
       workplacePostcode:
         typeof req.query.workplacePostcode === "string" ? req.query.workplacePostcode : null,
       commuteMode: typeof req.query.commuteMode === "string" ? req.query.commuteMode : null,
       commuteDaysPerWeek: Number(req.query.commuteDaysPerWeek ?? 0),
       commuteCostSensitivity: normalizeCostSensitivity(req.query.commuteCostSensitivity),
     };
+    const cappedAffordability = applyIncomeCap(affordability);
     const propertyType = typeof req.query.propertyType === "string" ? req.query.propertyType : "ALL";
-    const maxAffordable = computeMaxAffordable(affordability);
+    const maxAffordable = computeMaxAffordable(cappedAffordability);
     const maxAffordableCap = Math.floor(maxAffordable * 1.05);
 
     let commuteMeta = null;
@@ -272,7 +303,7 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
     }
 
     let row = affordability.workplacePostcode ? null : candidates[0];
-    if (affordability.workplacePostcode) {
+    if (cappedAffordability.workplacePostcode) {
       const commuteOrigins = candidates.map((candidate) => ({
         origin_key: candidate.postcode_norm,
         longitude: candidate.longitude,
@@ -280,23 +311,23 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
       }));
       const commuteResult = await getCommuteForOrigins({
         origins: commuteOrigins,
-        workplacePostcode: affordability.workplacePostcode,
-        mode: affordability.commuteMode,
-        daysPerWeek: affordability.commuteDaysPerWeek,
+        workplacePostcode: cappedAffordability.workplacePostcode,
+        mode: cappedAffordability.commuteMode,
+        daysPerWeek: cappedAffordability.commuteDaysPerWeek,
       });
 
       for (const candidate of candidates) {
         const commute = commuteResult.map.get(candidate.postcode_norm);
         const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
-          monthlyBudget: affordability.monthlyBudget,
+          monthlyBudget: cappedAffordability.monthlyBudget,
           commuteCostMonthly: commute?.cost_monthly ?? null,
-          costSensitivity: affordability.commuteCostSensitivity,
+          costSensitivity: cappedAffordability.commuteCostSensitivity,
         });
         const adjustedCap = computeMaxAffordableWithBudget({
           monthlyBudget: effectiveMonthlyBudget,
-          deposit: affordability.deposit,
-          mortgageRate: affordability.mortgageRate,
-          termYears: affordability.termYears,
+          deposit: cappedAffordability.deposit,
+          mortgageRate: cappedAffordability.mortgageRate,
+          termYears: cappedAffordability.termYears,
         });
         if (Number(candidate.price_adj ?? 0) <= adjustedCap) {
           row = candidate;
@@ -336,17 +367,17 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
     const priceForMortgage = Number(row?.price_adj ?? inflationAdjusted ?? row?.price ?? 0);
     const mortgageMonthly = computeMonthlyMortgagePayment({
       price: priceForMortgage,
-      deposit: affordability.deposit,
-      mortgageRate: affordability.mortgageRate,
-      termYears: affordability.termYears,
+      deposit: cappedAffordability.deposit,
+      mortgageRate: cappedAffordability.mortgageRate,
+      termYears: cappedAffordability.termYears,
     });
     const commuteCostMonthly = commuteMeta?.cost_monthly ?? 0;
-    const commuteSensitivity = affordability.commuteCostSensitivity ?? 0;
+    const commuteSensitivity = cappedAffordability.commuteCostSensitivity ?? 0;
     const commuteAdjusted = commuteCostMonthly * commuteSensitivity;
     const totalMonthlyCost = mortgageMonthly + commuteCostMonthly;
     const totalMonthlyCostAdjusted = mortgageMonthly + commuteAdjusted;
-    const budgetRemaining = affordability.monthlyBudget - totalMonthlyCost;
-    const budgetRemainingAdjusted = affordability.monthlyBudget - totalMonthlyCostAdjusted;
+    const budgetRemaining = cappedAffordability.monthlyBudget - totalMonthlyCost;
+    const budgetRemainingAdjusted = cappedAffordability.monthlyBudget - totalMonthlyCostAdjusted;
 
     res.json({
       row,
@@ -553,12 +584,14 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       deposit: safeNumber(affordability?.deposit),
       mortgageRate: safeNumber(affordability?.mortgageRate),
       termYears: safeNumber(affordability?.termYears),
+      incomeAnnual: safeNumber(affordability?.incomeAnnual),
       workplacePostcode:
         typeof affordability?.workplacePostcode === "string" ? affordability.workplacePostcode : null,
       commuteMode: typeof affordability?.commuteMode === "string" ? affordability.commuteMode : null,
       commuteDaysPerWeek: safeNumber(affordability?.commuteDaysPerWeek),
       commuteCostSensitivity: normalizeCostSensitivity(affordability?.commuteCostSensitivity),
     };
+    const cappedAffordability = applyIncomeCap(safeAffordability);
     const safeFilters = {
       maxCommute: safeNumber(filters?.maxCommute ?? 120),
       minSchools: safeNumber(filters?.minSchools ?? 0),
@@ -568,37 +601,37 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       typeof propertyType === "string" && propertyType.trim() !== ""
         ? propertyType.trim().toUpperCase()
         : "ALL";
-    const maxAffordable = computeMaxAffordable(safeAffordability);
+    const maxAffordable = computeMaxAffordable(cappedAffordability);
     const maxPriceCap = Number.isFinite(maxAffordable) ? Math.floor(maxAffordable * 1.05) : 0;
     let commuteMeta = null;
 
-    const cacheKey = `rank:${derivedScope}:${JSON.stringify(bbox)}:${JSON.stringify(safeAffordability)}:${JSON.stringify(
+    const cacheKey = `rank:${derivedScope}:${JSON.stringify(bbox)}:${JSON.stringify(cappedAffordability)}:${JSON.stringify(
       safeFilters
     )}:${JSON.stringify(safePriorities)}:${safePropertyType}:${limit}`;
     const cached = getCache(cacheKey);
     if (cached && cached.meta != null) return res.json(cached);
 
     const baseLimit = Math.min(Number(limit), 100);
-    const prefetchLimit = safeAffordability.workplacePostcode
+    const prefetchLimit = cappedAffordability.workplacePostcode
       ? Math.min(baseLimit * 5, 500)
       : baseLimit;
 
     const result = await getRankedSectors({
       scope: derivedScope,
       bbox,
-      affordability: safeAffordability,
+      affordability: cappedAffordability,
       filters: safeFilters,
       priorities: safePriorities,
       propertyType: safePropertyType,
       limit: prefetchLimit,
     });
 
-    if (safeAffordability.workplacePostcode) {
+    if (cappedAffordability.workplacePostcode) {
       const commuteResult = await getCommuteForSectors({
         sectors: result.rows,
-        workplacePostcode: safeAffordability.workplacePostcode,
-        mode: safeAffordability.commuteMode,
-        daysPerWeek: safeAffordability.commuteDaysPerWeek,
+        workplacePostcode: cappedAffordability.workplacePostcode,
+        mode: cappedAffordability.commuteMode,
+        daysPerWeek: cappedAffordability.commuteDaysPerWeek,
       });
       commuteMeta = commuteResult.meta ?? null;
       const commuteMap = commuteResult.map;
@@ -613,17 +646,17 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
           );
           const mortgageMonthly = computeMonthlyMortgagePayment({
             price: medianAdj,
-            deposit: safeAffordability.deposit,
-            mortgageRate: safeAffordability.mortgageRate,
-            termYears: safeAffordability.termYears,
+            deposit: cappedAffordability.deposit,
+            mortgageRate: cappedAffordability.mortgageRate,
+            termYears: cappedAffordability.termYears,
           });
-          const sensitivity = safeAffordability.commuteCostSensitivity ?? 0;
+          const sensitivity = cappedAffordability.commuteCostSensitivity ?? 0;
           const commuteAdjusted = Number.isFinite(costMonthly) ? costMonthly * sensitivity : 0;
           const totalMonthlyCost = mortgageMonthly + (Number.isFinite(costMonthly) ? costMonthly : 0);
           const totalMonthlyCostAdjusted = mortgageMonthly + commuteAdjusted;
           const affordabilityRatio =
-            safeAffordability.monthlyBudget > 0
-              ? totalMonthlyCostAdjusted / safeAffordability.monthlyBudget
+            cappedAffordability.monthlyBudget > 0
+              ? totalMonthlyCostAdjusted / cappedAffordability.monthlyBudget
               : null;
           if (affordabilityRatio !== null && affordabilityRatio > 1) {
             return null;
@@ -634,15 +667,15 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
           const affordabilityPenalty =
             affordabilityRatio !== null ? Math.max(0, Math.min((affordabilityRatio - 1) * 0.5, 1)) : 0;
           const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
-            monthlyBudget: safeAffordability.monthlyBudget,
+            monthlyBudget: cappedAffordability.monthlyBudget,
             commuteCostMonthly: costMonthly,
             costSensitivity: sensitivity,
           });
           const affordabilityCapAdjusted = computeMaxAffordableWithBudget({
             monthlyBudget: effectiveMonthlyBudget,
-            deposit: safeAffordability.deposit,
-            mortgageRate: safeAffordability.mortgageRate,
-            termYears: safeAffordability.termYears,
+            deposit: cappedAffordability.deposit,
+            mortgageRate: cappedAffordability.mortgageRate,
+            termYears: cappedAffordability.termYears,
           });
 
           return {
@@ -653,7 +686,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
             total_monthly_cost: Math.round(totalMonthlyCost),
             total_monthly_cost_adjusted: Math.round(totalMonthlyCostAdjusted),
             budget_remaining: Math.round(
-              safeAffordability.monthlyBudget - totalMonthlyCostAdjusted
+              cappedAffordability.monthlyBudget - totalMonthlyCostAdjusted
             ),
             effective_monthly_budget: Math.round(effectiveMonthlyBudget),
             affordability_cap_adjusted: Math.round(affordabilityCapAdjusted),
@@ -677,7 +710,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
         commute: commuteMeta,
         empty_reason: result.rows.length
           ? null
-          : safeAffordability.workplacePostcode
+          : cappedAffordability.workplacePostcode
             ? "no_commute_affordable_results"
             : "no_affordable_results",
       },
@@ -689,7 +722,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
         property_type: safePropertyType,
         zoom: Number(zoom),
         commute: commuteMeta,
-        empty_reason: safeAffordability.workplacePostcode
+        empty_reason: cappedAffordability.workplacePostcode
           ? "no_commute_affordable_results"
           : "no_affordable_results",
       };
@@ -720,13 +753,15 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       deposit: safeNumber(affordability?.deposit),
       mortgageRate: safeNumber(affordability?.mortgageRate),
       termYears: safeNumber(affordability?.termYears),
+      incomeAnnual: safeNumber(affordability?.incomeAnnual),
       workplacePostcode:
         typeof affordability?.workplacePostcode === "string" ? affordability.workplacePostcode : null,
       commuteMode: typeof affordability?.commuteMode === "string" ? affordability.commuteMode : null,
       commuteDaysPerWeek: safeNumber(affordability?.commuteDaysPerWeek),
       commuteCostSensitivity: normalizeCostSensitivity(affordability?.commuteCostSensitivity),
     };
-    const maxAffordable = computeMaxAffordable(safeAffordability);
+    const cappedAffordability = applyIncomeCap(safeAffordability);
+    const maxAffordable = computeMaxAffordable(cappedAffordability);
     const maxPriceCap = Number.isFinite(maxAffordable) ? Math.floor(maxAffordable * 1.05) : 0;
     const safePropertyType =
       typeof propertyType === "string" && propertyType.trim() !== ""
@@ -746,7 +781,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
     }
 
     const cacheKey = `affordable-heatmap:${zoom}:${bbox.join(",")}:${maxPriceCap}:${safePropertyType}:${JSON.stringify(
-      safeAffordability
+      cappedAffordability
     )}:${limit}`;
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
@@ -754,7 +789,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
     const pointZoomThreshold = Number(process.env.POINT_ZOOM_THRESHOLD || 10);
     const usePoints = Number.isFinite(zoom) && zoom >= pointZoomThreshold;
 
-    if (safeAffordability.workplacePostcode) {
+    if (cappedAffordability.workplacePostcode) {
       if (usePoints) {
         const { rows: rawPoints } = await pool.query(
           `
@@ -801,9 +836,9 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
 
         const commuteResult = await getCommuteForOrigins({
           origins: commuteOrigins,
-          workplacePostcode: safeAffordability.workplacePostcode,
-          mode: safeAffordability.commuteMode,
-          daysPerWeek: safeAffordability.commuteDaysPerWeek,
+          workplacePostcode: cappedAffordability.workplacePostcode,
+          mode: cappedAffordability.commuteMode,
+          daysPerWeek: cappedAffordability.commuteDaysPerWeek,
         });
 
         const rows = rawPoints
@@ -814,15 +849,15 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
                 ? commute.duration_sec / 60
                 : null;
             const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
-              monthlyBudget: safeAffordability.monthlyBudget,
+              monthlyBudget: cappedAffordability.monthlyBudget,
               commuteCostMonthly: commute?.cost_monthly ?? null,
-              costSensitivity: safeAffordability.commuteCostSensitivity,
+              costSensitivity: cappedAffordability.commuteCostSensitivity,
             });
             const adjustedCap = computeMaxAffordableWithBudget({
               monthlyBudget: effectiveMonthlyBudget,
-              deposit: safeAffordability.deposit,
-              mortgageRate: safeAffordability.mortgageRate,
-              termYears: safeAffordability.termYears,
+              deposit: cappedAffordability.deposit,
+              mortgageRate: cappedAffordability.mortgageRate,
+              termYears: cappedAffordability.termYears,
             });
             if (!Number.isFinite(adjustedCap) || adjustedCap <= 0) return null;
             if (Number(point.price_adj ?? 0) > adjustedCap) return null;
@@ -860,7 +895,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       const baseRanked = await getRankedSectors({
         scope: "viewport",
         bbox,
-        affordability: safeAffordability,
+        affordability: cappedAffordability,
         filters: { maxCommute: 0, minSchools: 0, maxCrime: 100 },
         priorities: ["price"],
         propertyType: safePropertyType,
@@ -868,9 +903,9 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       });
       const commuteResult = await getCommuteForSectors({
         sectors: baseRanked.rows,
-        workplacePostcode: safeAffordability.workplacePostcode,
-        mode: safeAffordability.commuteMode,
-        daysPerWeek: safeAffordability.commuteDaysPerWeek,
+        workplacePostcode: cappedAffordability.workplacePostcode,
+        mode: cappedAffordability.commuteMode,
+        daysPerWeek: cappedAffordability.commuteDaysPerWeek,
       });
       const commuteMap = commuteResult.map;
 
@@ -883,15 +918,15 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
               : null;
           const costMonthly = commute?.cost_monthly ?? null;
           const effectiveMonthlyBudget = computeEffectiveMonthlyBudget({
-            monthlyBudget: safeAffordability.monthlyBudget,
+            monthlyBudget: cappedAffordability.monthlyBudget,
             commuteCostMonthly: costMonthly,
-            costSensitivity: safeAffordability.commuteCostSensitivity,
+            costSensitivity: cappedAffordability.commuteCostSensitivity,
           });
           const adjustedCap = computeMaxAffordableWithBudget({
             monthlyBudget: effectiveMonthlyBudget,
-            deposit: safeAffordability.deposit,
-            mortgageRate: safeAffordability.mortgageRate,
-            termYears: safeAffordability.termYears,
+            deposit: cappedAffordability.deposit,
+            mortgageRate: cappedAffordability.mortgageRate,
+            termYears: cappedAffordability.termYears,
           });
           const medianAdj = Number(
             sector.median_price_adj ?? sector.inflation_adjusted_price ?? sector.median_price ?? 0

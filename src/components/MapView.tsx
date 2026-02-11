@@ -13,6 +13,7 @@ type Props = {
   showBestFit: boolean;
   councilTaxMonthly?: number;
   affordability?: {
+    incomeAnnual?: number;
     monthlyBudget: number;
     deposit: number;
     mortgageRate: number;

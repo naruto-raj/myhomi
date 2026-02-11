@@ -145,7 +145,13 @@ export function fetchNearestPostcode(lat: number, lng: number) {
 export function fetchNearestAffordablePostcode(
   lat: number,
   lng: number,
-  affordability: { monthlyBudget: number; deposit: number; mortgageRate: number; termYears: number },
+  affordability: {
+    incomeAnnual?: number;
+    monthlyBudget: number;
+    deposit: number;
+    mortgageRate: number;
+    termYears: number;
+  },
   propertyType?: string,
   commute?: {
     workplacePostcode?: string | null;
@@ -162,6 +168,9 @@ export function fetchNearestAffordablePostcode(
     mortgageRate: String(affordability.mortgageRate ?? 0),
     termYears: String(affordability.termYears ?? 0),
   });
+  if (Number.isFinite(affordability.incomeAnnual ?? NaN)) {
+    params.set("incomeAnnual", String(affordability.incomeAnnual ?? 0));
+  }
   if (commute?.workplacePostcode) {
     params.set("workplacePostcode", commute.workplacePostcode);
   }
@@ -216,6 +225,7 @@ export function fetchSectorRankings(payload: {
   zoom?: number;
   bbox?: number[];
   affordability: {
+    incomeAnnual?: number;
     monthlyBudget: number;
     deposit: number;
     mortgageRate: number;
@@ -266,6 +276,7 @@ export function fetchAffordableHeatmap(payload: {
   zoom?: number;
   bbox: number[];
   affordability: {
+    incomeAnnual?: number;
     monthlyBudget: number;
     deposit: number;
     mortgageRate: number;
