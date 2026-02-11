@@ -102,8 +102,15 @@ export async function getLatestPricePaidNearPoint(longitude, latitude) {
   return rows[0] || null;
 }
 
-export async function getNearestAffordablePricePaid(longitude, latitude, maxPrice, propertyType) {
+export async function getNearestAffordablePricePaid(
+  longitude,
+  latitude,
+  maxPrice,
+  propertyType,
+  tenure
+) {
   const filterByType = propertyType && propertyType !== "ALL";
+  const filterByTenure = tenure && tenure !== "ALL";
   const { rows } = await pool.query(
     `
       SELECT
@@ -121,10 +128,11 @@ export async function getNearestAffordablePricePaid(longitude, latitude, maxPric
       FROM postcode_latest pl
       WHERE pl.price_adj <= $3
         AND (COALESCE($4::boolean, false) = false OR pl.property_type = $5)
+        AND (COALESCE($6::boolean, false) = false OR pl.duration = $7)
       ORDER BY pl.geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
       LIMIT 1;
     `,
-    [longitude, latitude, maxPrice, filterByType, propertyType || null]
+    [longitude, latitude, maxPrice, filterByType, propertyType || null, filterByTenure, tenure || null]
   );
   return rows[0] || null;
 }
@@ -134,9 +142,11 @@ export async function getNearestAffordableCandidates(
   latitude,
   maxPrice,
   propertyType,
+  tenure,
   limit = 30
 ) {
   const filterByType = propertyType && propertyType !== "ALL";
+  const filterByTenure = tenure && tenure !== "ALL";
   const { rows } = await pool.query(
     `
       SELECT
@@ -154,10 +164,20 @@ export async function getNearestAffordableCandidates(
       FROM postcode_latest pl
       WHERE pl.price_adj <= $3
         AND (COALESCE($4::boolean, false) = false OR pl.property_type = $5)
+        AND (COALESCE($6::boolean, false) = false OR pl.duration = $7)
       ORDER BY pl.geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
-      LIMIT $6;
+      LIMIT $8;
     `,
-    [longitude, latitude, maxPrice, filterByType, propertyType || null, limit]
+    [
+      longitude,
+      latitude,
+      maxPrice,
+      filterByType,
+      propertyType || null,
+      filterByTenure,
+      tenure || null,
+      limit,
+    ]
   );
   return rows;
 }

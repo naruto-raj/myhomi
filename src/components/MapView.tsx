@@ -25,8 +25,15 @@ type Props = {
   };
   maxAffordable?: number;
   propertyType?: string;
+  tenureFilter?: string;
   selectedSector?: SectorStat | null;
   onCouncilTaxUpdate?: (postcode: string) => void;
+  onNearestSelected?: (payload: {
+    latitude: number;
+    longitude: number;
+    postcode?: string | null;
+    price?: number | null;
+  }) => void;
   onViewportChange?: (bbox: number[], zoom: number) => void;
   focusPoint?: { latitude: number; longitude: number } | null;
 };
@@ -43,9 +50,11 @@ export default function MapView({
   affordability,
   maxAffordable,
   propertyType,
+  tenureFilter,
   selectedSector,
   councilTaxMonthly = 0,
   onCouncilTaxUpdate,
+  onNearestSelected,
   onViewportChange,
   focusPoint,
 }: Props) {
@@ -178,12 +187,19 @@ export default function MapView({
       const propertyTypeValue = propertyTypeRef.current;
       if (showBestFitRef.current && affordabilityValue) {
         try {
-          result = await fetchNearestAffordablePostcode(lat, lng, affordabilityValue, propertyTypeValue, {
+          result = await fetchNearestAffordablePostcode(
+            lat,
+            lng,
+            affordabilityValue,
+            propertyTypeValue,
+            tenureFilter,
+            {
             workplacePostcode: affordabilityValue.workplacePostcode,
             commuteMode: affordabilityValue.commuteMode,
             commuteDaysPerWeek: affordabilityValue.commuteDaysPerWeek,
             commuteCostSensitivity: affordabilityValue.commuteCostSensitivity,
-          });
+          }
+          );
           label = options?.label || "Nearest Affordable Sale";
         } catch {
           result = await fetchNearestPostcode(lat, lng);
@@ -211,6 +227,18 @@ export default function MapView({
       }
       const targetLat = row?.latitude ?? lat;
       const targetLng = row?.longitude ?? lng;
+      const selectedPrice =
+        result.meta?.price_for_mortgage ??
+        result.meta?.inflation_adjusted_price ??
+        (row?.price ?? null);
+      if (onNearestSelected && Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
+        onNearestSelected({
+          latitude: targetLat,
+          longitude: targetLng,
+          postcode: row?.postcode ?? null,
+          price: Number.isFinite(selectedPrice ?? NaN) ? Number(selectedPrice) : null,
+        });
+      }
       const rawDate = row?.date_of_transfer ? String(row.date_of_transfer) : "";
       const parsedDate = rawDate ? new Date(rawDate) : null;
       const date =
@@ -225,6 +253,10 @@ export default function MapView({
         parsedDate && !Number.isNaN(parsedDate.valueOf()) ? parsedDate.getUTCFullYear() : null;
       const price = row?.price ?? null;
       const adjusted = result.meta?.inflation_adjusted_price ?? null;
+      const epc = result.epc ?? null;
+      const floorAreaM2 = epc?.floor_area_m2 ?? null;
+      const floorAreaSqft =
+        epc?.floor_area_sqft ?? (floorAreaM2 ? Math.round(Number(floorAreaM2) * 10.7639) : null);
       const pct = result.meta?.inflation_percent_change ?? null;
       const pctText = pct !== null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
       const arrow = pct === null ? "" : pct > 0 ? "▲" : pct < 0 ? "▼" : "•";
@@ -340,6 +372,19 @@ export default function MapView({
             `
           : "";
 
+      const floorAreaLine = `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+          <span>Floor area (EPC)</span>
+          <span style="color:#0f172a;font-weight:600;">
+            ${
+              floorAreaM2 || floorAreaSqft
+                ? `${floorAreaM2 ? `${Math.round(Number(floorAreaM2))} m²` : ""}${
+                    floorAreaSqft ? ` · ${Math.round(Number(floorAreaSqft))} sq ft` : ""
+                  }`
+                : "—"
+            }
+          </span>
+        </div>`;
+
       const sectorLine =
         options?.sectorMedianAdj
           ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
@@ -383,6 +428,7 @@ export default function MapView({
 
             <div style="margin-top:8px; display:grid; grid-template-columns:1fr; gap:4px;">
               ${sectorLine}
+              ${floorAreaLine}
               ${commuteLine}
               <div style="font-size:9px; color:#94a3b8;">${inflationMeta}</div>
             </div>

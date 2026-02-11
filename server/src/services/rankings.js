@@ -14,6 +14,7 @@ export async function getRankedSectors({
   filters,
   priorities,
   propertyType,
+  tenure,
   limit = 50,
 }) {
   const maxAffordable = (() => {
@@ -31,6 +32,7 @@ export async function getRankedSectors({
   const maxPriceCap = Math.floor(maxAffordable * 1.05);
 
   const filterByType = propertyType && propertyType !== "ALL";
+  const filterByTenure = tenure && tenure !== "ALL";
   let rows = [];
   if (scope === "viewport") {
     const [minLng, minLat, maxLng, maxLat] = bbox;
@@ -49,9 +51,10 @@ export async function getRankedSectors({
         WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
           AND price_adj <= $5
           AND ($6::boolean = false OR property_type = $7::text)
+          AND ($8::boolean = false OR duration = $9::text)
         GROUP BY sector
         ORDER BY transactions DESC
-        LIMIT $8;
+        LIMIT $10;
       `,
       [
         minLng,
@@ -61,6 +64,8 @@ export async function getRankedSectors({
         maxPriceCap,
         Boolean(filterByType),
         propertyType || "ALL",
+        Boolean(filterByTenure),
+        tenure || "ALL",
         Math.min(limit * 5, 2000),
       ]
     );
@@ -80,11 +85,19 @@ export async function getRankedSectors({
         FROM postcode_latest
         WHERE price_adj <= $1
           AND ($2::boolean = false OR property_type = $3::text)
+          AND ($4::boolean = false OR duration = $5::text)
         GROUP BY sector
         ORDER BY transactions DESC
-        LIMIT $4;
+        LIMIT $6;
       `,
-      [maxPriceCap, Boolean(filterByType), propertyType || "ALL", Math.min(limit * 5, 5000)]
+      [
+        maxPriceCap,
+        Boolean(filterByType),
+        propertyType || "ALL",
+        Boolean(filterByTenure),
+        tenure || "ALL",
+        Math.min(limit * 5, 5000),
+      ]
     );
     rows = result.rows;
   }
@@ -124,10 +137,11 @@ export async function getRankedSectors({
         WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
           AND price_adj <= $5
           AND property_type IS NOT NULL
+          AND ($6::boolean = false OR duration = $7::text)
         GROUP BY property_type
         ORDER BY property_type;
       `,
-      [minLng, minLat, maxLng, maxLat, maxPriceCap]
+      [minLng, minLat, maxLng, maxLat, maxPriceCap, Boolean(filterByTenure), tenure || "ALL"]
     );
     typeRanges = result.rows;
   } else {
@@ -141,10 +155,11 @@ export async function getRankedSectors({
         FROM postcode_latest
         WHERE price_adj <= $1
           AND property_type IS NOT NULL
+          AND ($2::boolean = false OR duration = $3::text)
         GROUP BY property_type
         ORDER BY property_type;
       `,
-      [maxPriceCap]
+      [maxPriceCap, Boolean(filterByTenure), tenure || "ALL"]
     );
     typeRanges = result.rows;
   }

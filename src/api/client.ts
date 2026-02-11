@@ -27,6 +27,16 @@ export type PostcodeLatest = {
   record_status?: string;
 };
 
+export type EpcInfo = {
+  postcode_norm: string;
+  floor_area_m2: number | null;
+  floor_area_sqft: number | null;
+  property_type?: string | null;
+  tenure?: string | null;
+  current_energy_rating?: string | null;
+  lodgement_date?: string | null;
+};
+
 export type SectorStat = {
   sector: string;
   median_price: number;
@@ -80,6 +90,64 @@ export function fetchPricePaidViewport(bbox: number[], limit = 2000) {
   return json<{ rows: PricePaidPoint[] }>(`/api/price-paid/viewport?${params.toString()}`);
 }
 
+export function fetchPricePaidViewportWithTenure(
+  bbox: number[],
+  limit: number,
+  tenure?: string
+) {
+  const params = new URLSearchParams({
+    bbox: bbox.join(","),
+    limit: String(limit),
+  });
+  if (tenure && tenure !== "ALL") {
+    params.set("tenure", tenure);
+  }
+  return json<{ rows: PricePaidPoint[] }>(`/api/price-paid/viewport?${params.toString()}`);
+}
+
+export function fetchPriceComps(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  years?: number;
+  limit?: number;
+  tenure?: string;
+}) {
+  const search = new URLSearchParams({
+    lat: String(params.lat),
+    lng: String(params.lng),
+  });
+  if (Number.isFinite(params.radiusKm ?? NaN)) {
+    search.set("radiusKm", String(params.radiusKm ?? 1));
+  }
+  if (Number.isFinite(params.years ?? NaN)) {
+    search.set("years", String(params.years ?? 2));
+  }
+  if (Number.isFinite(params.limit ?? NaN)) {
+    search.set("limit", String(params.limit ?? 2000));
+  }
+  if (params.tenure && params.tenure !== "ALL") {
+    search.set("tenure", params.tenure);
+  }
+  return json<{
+    stats: {
+      count: number;
+      p25: number | null;
+      median: number | null;
+      p75: number | null;
+      avg: number | null;
+      min: number | null;
+      max: number | null;
+      latest_date?: string | null;
+    } | null;
+    meta: {
+      radius_km: number;
+      years: number;
+      limit: number;
+    };
+  }>(`/api/price-paid/comps?${search.toString()}`);
+}
+
 export function fetchPostcodeLocation(postcode: string) {
   const params = new URLSearchParams({ postcode });
   return json<{ location: { postcode: string; latitude: number; longitude: number } }>(
@@ -109,6 +177,7 @@ export function fetchPostcodeLatest(postcode: string) {
   const params = new URLSearchParams({ postcode });
   return json<{
     row: PostcodeLatest;
+    epc?: EpcInfo | null;
     meta?: {
       price_year?: number | null;
       inflation_base_year?: number | null;
@@ -129,6 +198,7 @@ export function fetchNearestPostcode(lat: number, lng: number) {
       longitude?: number;
       postcode_norm?: string;
     };
+    epc?: EpcInfo | null;
     meta?: {
       price_year?: number | null;
       inflation_base_year?: number | null;
@@ -153,6 +223,7 @@ export function fetchNearestAffordablePostcode(
     termYears: number;
   },
   propertyType?: string,
+  tenure?: string,
   commute?: {
     workplacePostcode?: string | null;
     commuteMode?: string | null;
@@ -186,6 +257,9 @@ export function fetchNearestAffordablePostcode(
   if (propertyType && propertyType !== "ALL") {
     params.set("propertyType", propertyType);
   }
+  if (tenure && tenure !== "ALL") {
+    params.set("tenure", tenure);
+  }
   return json<{
     row: PostcodeLatest & {
       latitude?: number;
@@ -193,6 +267,7 @@ export function fetchNearestAffordablePostcode(
       postcode_norm?: string;
       price_adj?: number;
     };
+    epc?: EpcInfo | null;
     meta?: {
       price_year?: number | null;
       inflation_base_year?: number | null;
@@ -224,6 +299,7 @@ export function fetchNearestAffordablePostcode(
 export function fetchSectorRankings(payload: {
   zoom?: number;
   bbox?: number[];
+  tenure?: string;
   affordability: {
     incomeAnnual?: number;
     monthlyBudget: number;
@@ -275,6 +351,7 @@ export function fetchSectorRankings(payload: {
 export function fetchAffordableHeatmap(payload: {
   zoom?: number;
   bbox: number[];
+  tenure?: string;
   affordability: {
     incomeAnnual?: number;
     monthlyBudget: number;

@@ -1,7 +1,8 @@
 import { pool } from "../db.js";
 
-export async function getPricePaidInViewport(bbox, limit = 2000) {
+export async function getPricePaidInViewport(bbox, limit = 2000, tenureCode = null) {
   const [minLng, minLat, maxLng, maxLat] = bbox;
+  const filterTenure = Boolean(tenureCode);
   const { rows } = await pool.query(
     `
       SELECT
@@ -15,9 +16,10 @@ export async function getPricePaidInViewport(bbox, limit = 2000) {
       JOIN postcode_coords pc
         ON pc.postcode_norm = pp.postcode_norm
       WHERE pc.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
-      LIMIT $5;
+        AND ($5::boolean = false OR pp.duration = $6::text)
+      LIMIT $7;
     `,
-    [minLng, minLat, maxLng, maxLat, limit]
+    [minLng, minLat, maxLng, maxLat, filterTenure, tenureCode, limit]
   );
   return rows;
 }

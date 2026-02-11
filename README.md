@@ -55,6 +55,15 @@ python3 server/scripts/convert-council-tax-wales-xlsx.py
 docker compose run --rm server sh -lc "COUNCIL_TAX_CSV=../data/council_tax_band_d_wales_2025_26.csv node scripts/ingest-council-tax.js"
 ```
 
+### EPC (Floor Area)
+Floor area comes from the EPC Open Data API (England & Wales). Requires API credentials.
+Set these in `server/.env` (or in Docker Compose env):
+```
+EPC_API_EMAIL=<email_used_for_epc_api>
+EPC_API_KEY=<epc_api_key>
+EPC_CACHE_TTL_DAYS=30
+```
+
 ## Docker Data Ingest
 ```bash
 # Price Paid (fast mode)
@@ -97,6 +106,9 @@ COMMUTE_DAYS_PER_WEEK=5
 COMMUTE_CACHE_TTL_DAYS=30
 COMMUTE_MAX_ORIGINS=120
 COMMUTE_BATCH_SIZE=50
+EPC_API_EMAIL=<email_used_for_epc_api>
+EPC_API_KEY=<epc_api_key>
+EPC_CACHE_TTL_DAYS=30
 ```
 
 Example root `.env`:

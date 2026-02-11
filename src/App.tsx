@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPostcodeLocation,
   fetchPricePaidByPostcode,
-  fetchPricePaidViewport,
+  fetchPricePaidViewportWithTenure,
+  fetchPriceComps,
   fetchCouncilTax,
   fetchAffordableHeatmap,
   fetchSectorRankings,
@@ -158,6 +159,7 @@ export default function App() {
     maxCrime: 60,
   });
   const [propertyType, setPropertyType] = useState("ALL");
+  const [tenureFilter, setTenureFilter] = useState("ALL");
   const [affordability, setAffordability] = useState({
     incomeAnnual: 60000,
     monthlyBudget: 1200,
@@ -169,6 +171,7 @@ export default function App() {
   const [councilTaxMonthly, setCouncilTaxMonthly] = useState(150);
   const [purchasePrice, setPurchasePrice] = useState(350000);
   const [purchasePriceTouched, setPurchasePriceTouched] = useState(false);
+  const [selectedPurchasePrice, setSelectedPurchasePrice] = useState<number | null>(null);
   const [fees, setFees] = useState({
     legal: 1500,
     survey: 600,
@@ -188,6 +191,36 @@ export default function App() {
   const [showBestFit, setShowBestFit] = useState(true);
   const [selectedSector, setSelectedSector] = useState<SectorStat | null>(null);
   const [bestFitSort, setBestFitSort] = useState("score");
+  const [offerChecklist, setOfferChecklist] = useState<Record<string, boolean>>({
+    aip: false,
+    funds: false,
+    solicitor: false,
+    id: false,
+    notes: false,
+  });
+  const [showOfferTimeline, setShowOfferTimeline] = useState(false);
+  const [rateStressDelta, setRateStressDelta] = useState(2);
+  const [compsAnchor, setCompsAnchor] = useState<{
+    latitude: number;
+    longitude: number;
+    postcode?: string | null;
+  } | null>(null);
+  const [compsRadiusKm, setCompsRadiusKm] = useState(1);
+  const [compsYears, setCompsYears] = useState(2);
+  const [offerComps, setOfferComps] = useState<{
+    count: number;
+    p25: number | null;
+    median: number | null;
+    p75: number | null;
+    avg: number | null;
+    min: number | null;
+    max: number | null;
+    latest_date?: string | null;
+  } | null>(null);
+  const [offerCompsMeta, setOfferCompsMeta] = useState<{ radius_km: number; years: number } | null>(
+    null
+  );
+  const [offerCompsError, setOfferCompsError] = useState<string | null>(null);
   const zoomThreshold = Number(import.meta.env.VITE_ZOOM_THRESHOLD || 8);
 
   const viewportTimer = useRef<number | null>(null);
@@ -236,14 +269,48 @@ export default function App() {
     () => incomeMortgagePrincipal + Math.max(affordability.deposit || 0, 0),
     [incomeMortgagePrincipal, affordability.deposit]
   );
-  const depositPctOfBankCap = useMemo(() => {
-    if (!bankCapPurchasePrice) return 0;
-    return (Math.max(affordability.deposit || 0, 0) / bankCapPurchasePrice) * 100;
-  }, [bankCapPurchasePrice, affordability.deposit]);
-  const bankCapMonthlyGap = useMemo(() => {
-    if (!incomeMaxMonthly) return null;
-    return affordability.monthlyBudget - incomeMaxMonthly;
-  }, [affordability.monthlyBudget, incomeMaxMonthly]);
+  const effectiveMaxPurchase = useMemo(() => {
+    if (incomeMaxMonthly > 0 && Number.isFinite(bankCapPurchasePrice)) {
+      return Math.min(maxAffordable, bankCapPurchasePrice);
+    }
+    return maxAffordable;
+  }, [incomeMaxMonthly, bankCapPurchasePrice, maxAffordable]);
+  const depositPctOfMax = useMemo(() => {
+    if (!effectiveMaxPurchase) return 0;
+    return (Math.max(affordability.deposit || 0, 0) / effectiveMaxPurchase) * 100;
+  }, [effectiveMaxPurchase, affordability.deposit]);
+  const mortgageMonthlyAtCap = useMemo(() => {
+    const principal = Math.max(effectiveMaxPurchase - Math.max(affordability.deposit || 0, 0), 0);
+    if (principal <= 0) return 0;
+    return computeMonthlyPaymentFromPrincipal({
+      principal,
+      mortgageRate: affordability.mortgageRate,
+      termYears: affordability.termYears,
+    });
+  }, [effectiveMaxPurchase, affordability.deposit, affordability.mortgageRate, affordability.termYears]);
+  const capMonthlyGap = useMemo(() => {
+    if (!Number.isFinite(mortgageMonthlyAtCap)) return null;
+    return affordability.monthlyBudget - mortgageMonthlyAtCap;
+  }, [affordability.monthlyBudget, mortgageMonthlyAtCap]);
+  const stressedMonthlyAtCap = useMemo(() => {
+    const principal = Math.max(effectiveMaxPurchase - Math.max(affordability.deposit || 0, 0), 0);
+    if (principal <= 0) return 0;
+    return computeMonthlyPaymentFromPrincipal({
+      principal,
+      mortgageRate: affordability.mortgageRate + rateStressDelta,
+      termYears: affordability.termYears,
+    });
+  }, [
+    effectiveMaxPurchase,
+    affordability.deposit,
+    affordability.mortgageRate,
+    affordability.termYears,
+    rateStressDelta,
+  ]);
+  const stressedMonthlyGap = useMemo(() => {
+    if (!Number.isFinite(stressedMonthlyAtCap)) return null;
+    return affordability.monthlyBudget - stressedMonthlyAtCap;
+  }, [affordability.monthlyBudget, stressedMonthlyAtCap]);
 
   useEffect(() => {
     if (!Number.isFinite(incomeMaxMonthly) || incomeMaxMonthly <= 0) return;
@@ -262,9 +329,34 @@ export default function App() {
 
   useEffect(() => {
     if (!purchasePriceTouched) {
-      setPurchasePrice(Math.round(maxAffordable));
+      const next = selectedPurchasePrice ?? effectiveMaxPurchase;
+      if (Number.isFinite(next)) {
+        setPurchasePrice(Math.round(next));
+      }
     }
-  }, [maxAffordable, purchasePriceTouched]);
+  }, [effectiveMaxPurchase, purchasePriceTouched, selectedPurchasePrice]);
+
+  useEffect(() => {
+    if (!compsAnchor) return;
+    setOfferCompsError(null);
+    fetchPriceComps({
+      lat: compsAnchor.latitude,
+      lng: compsAnchor.longitude,
+      radiusKm: compsRadiusKm,
+      years: compsYears,
+      limit: 2000,
+      tenure: tenureFilter,
+    })
+      .then((data) => {
+        setOfferComps(data.stats ?? null);
+        setOfferCompsMeta({ radius_km: data.meta.radius_km, years: data.meta.years });
+      })
+      .catch((err) => {
+        setOfferComps(null);
+        setOfferCompsMeta(null);
+        setOfferCompsError(err.message || "Failed to load comps");
+      });
+  }, [compsAnchor, compsRadiusKm, compsYears, tenureFilter]);
 
   const stampDuty = useMemo(() => {
     if (!Number.isFinite(purchasePrice)) return 0;
@@ -272,6 +364,15 @@ export default function App() {
       ? computeSdltFirstTimeBuyer(purchasePrice)
       : computeSdltStandard(purchasePrice);
   }, [purchasePrice, isFirstTimeBuyer]);
+
+  const selectedDeposit = useMemo(
+    () => Math.max(0, Math.round((Number(purchasePrice) || 0) * 0.1)),
+    [purchasePrice]
+  );
+  const maxDeposit = useMemo(
+    () => Math.max(0, Math.round((Number(effectiveMaxPurchase) || 0) * 0.1)),
+    [effectiveMaxPurchase]
+  );
 
   const totalFees = useMemo(
     () =>
@@ -286,8 +387,8 @@ export default function App() {
   );
 
   const totalCashNeeded = useMemo(
-    () => Math.max(0, Math.round(affordability.deposit + stampDuty + totalFees)),
-    [affordability.deposit, stampDuty, totalFees]
+    () => Math.max(0, Math.round(selectedDeposit + stampDuty + totalFees)),
+    [selectedDeposit, stampDuty, totalFees]
   );
 
   const viewportNotice = viewportLoading
@@ -299,6 +400,7 @@ export default function App() {
     const payload = {
       zoom,
       bbox,
+      tenure: tenureFilter,
       affordability: {
         ...affordability,
         workplacePostcode: commute.workplacePostcode || null,
@@ -320,7 +422,9 @@ export default function App() {
 
     setViewportLoading(true);
     setSectors([]);
-    const pricePromise = useViewport ? fetchPricePaidViewport(bbox, 5000) : Promise.resolve({ rows: [] });
+    const pricePromise = useViewport
+      ? fetchPricePaidViewportWithTenure(bbox, 5000, tenureFilter)
+      : Promise.resolve({ rows: [] });
     const heatmapLimit = useViewport ? 2000 : 1200;
     const heatmapPromise = fetchAffordableHeatmap({ ...payload, limit: heatmapLimit }).catch(() => ({
       mode: "grid",
@@ -400,7 +504,7 @@ export default function App() {
     viewportTimer.current = window.setTimeout(() => {
       fetchRankingsForBbox(lastBboxRef.current as number[], lastZoomRef.current);
     }, 350);
-  }, [affordability, commute, filters, priorityOrder, propertyType]);
+  }, [affordability, commute, filters, priorityOrder, propertyType, tenureFilter]);
 
   useEffect(() => {
     if (commute.workplacePostcode && bestFitSort === "score") {
@@ -451,6 +555,11 @@ export default function App() {
     fetchPostcodeLocation(postcodeQuery)
       .then((data) => {
         setPostcodeLocation({ latitude: data.location.latitude, longitude: data.location.longitude });
+        setCompsAnchor({
+          latitude: data.location.latitude,
+          longitude: data.location.longitude,
+          postcode: data.location.postcode,
+        });
         loadCouncilTax(postcodeQuery);
         return fetchPricePaidByPostcode(postcodeQuery, 100);
       })
@@ -498,11 +607,28 @@ export default function App() {
         filters,
         priorities: priorityOrder,
         propertyType,
+        tenure: tenureFilter,
       },
       null,
       2
     );
-  }, [affordability, commute, filters, priorityOrder, propertyType, currentZoom]);
+  }, [affordability, commute, filters, priorityOrder, propertyType, tenureFilter, currentZoom]);
+
+  const offerRisk = useMemo(() => {
+    if (!offerComps || !Number.isFinite(purchasePrice) || purchasePrice <= 0) return null;
+    if (!offerComps.median) return null;
+    const p75 = offerComps.p75 ?? offerComps.median;
+    if (offerComps.count < 8) return { label: "Low confidence", tone: "muted" as const };
+    if (purchasePrice > p75 * 1.1) return { label: "High down-valuation risk", tone: "high" as const };
+    if (purchasePrice > p75) return { label: "Elevated risk", tone: "medium" as const };
+    if (purchasePrice > offerComps.median) return { label: "Above median", tone: "low" as const };
+    return { label: "In range", tone: "ok" as const };
+  }, [offerComps, purchasePrice]);
+
+  const offerVsMedianPct = useMemo(() => {
+    if (!offerComps?.median) return null;
+    return ((purchasePrice - offerComps.median) / offerComps.median) * 100;
+  }, [offerComps, purchasePrice]);
 
   return (
     <div className="min-h-screen text-slate-900">
@@ -628,23 +754,117 @@ export default function App() {
                   <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-slate-900">
-                        Bank-cap purchase: £{Math.round(bankCapPurchasePrice).toLocaleString()}
+                        Max purchase (cap): £{Math.round(effectiveMaxPurchase).toLocaleString()}
                       </span>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
-                        Deposit {depositPctOfBankCap.toFixed(1)}%
+                        Deposit {depositPctOfMax.toFixed(1)}%
                       </span>
                     </div>
                     <div className="mt-2 text-[11px] text-slate-500">
-                      Mortgage / mo at bank cap: £{Math.round(incomeMaxMonthly).toLocaleString()}
-                      {bankCapMonthlyGap !== null && (
+                      Mortgage / mo at cap: £{Math.round(mortgageMonthlyAtCap).toLocaleString()}
+                      {capMonthlyGap !== null && (
                         <span className="ml-2">
-                          · Budget {bankCapMonthlyGap >= 0 ? "▲" : "▼"} £
-                          {Math.abs(Math.round(bankCapMonthlyGap)).toLocaleString()}
+                          · Budget {capMonthlyGap >= 0 ? "▲" : "▼"} £
+                          {Math.abs(Math.round(capMonthlyGap)).toLocaleString()}
                         </span>
                       )}
                     </div>
                   </div>
                 )}
+                <div>
+                  <label className="text-xs text-slate-600">Tenure</label>
+                  <div className="mt-2 flex gap-2">
+                    {(() => {
+                      const freeActive = tenureFilter === "FREEHOLD" || tenureFilter === "ALL";
+                      const leaseActive = tenureFilter === "LEASEHOLD" || tenureFilter === "ALL";
+                      const activeClasses =
+                        "border-emerald-500 bg-emerald-500/20 text-emerald-700 shadow-sm";
+                      const inactiveClasses =
+                        "border-slate-200 bg-white text-slate-600 hover:border-emerald-200";
+                      const baseClasses =
+                        "flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition";
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            className={`${baseClasses} ${freeActive ? activeClasses : inactiveClasses}`}
+                            onClick={() => {
+                              if (freeActive && !leaseActive) return;
+                              if (freeActive && leaseActive) {
+                                setTenureFilter("LEASEHOLD");
+                                return;
+                              }
+                              if (!freeActive && leaseActive) {
+                                setTenureFilter("ALL");
+                                return;
+                              }
+                              setTenureFilter("FREEHOLD");
+                            }}
+                          >
+                            Freehold
+                          </button>
+                          <button
+                            type="button"
+                            className={`${baseClasses} ${leaseActive ? activeClasses : inactiveClasses}`}
+                            onClick={() => {
+                              if (leaseActive && !freeActive) return;
+                              if (leaseActive && freeActive) {
+                                setTenureFilter("FREEHOLD");
+                                return;
+                              }
+                              if (!leaseActive && freeActive) {
+                                setTenureFilter("ALL");
+                                return;
+                              }
+                              setTenureFilter("LEASEHOLD");
+                            }}
+                          >
+                            Leasehold
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-600">Property type</label>
+                  <select
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    value={propertyType}
+                    onChange={(e) => setPropertyType(e.target.value)}
+                  >
+                    <option value="ALL">All property types</option>
+                    <option value="D">Detached</option>
+                    <option value="S">Semi-detached</option>
+                    <option value="T">Terraced</option>
+                    <option value="F">Flat / Maisonette</option>
+                    <option value="O">Other</option>
+                  </select>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <label className="text-xs text-slate-600">Postcode (optional)</label>
+                  <form onSubmit={handlePostcodeSearch} className="mt-1 flex gap-2">
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                      type="text"
+                      placeholder="e.g., NW7 1SP"
+                      value={postcodeQuery}
+                      onChange={(e) => setPostcodeQuery(e.target.value)}
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-xl border border-emerald-500 bg-emerald-500/20 px-4 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/30"
+                    >
+                      Go
+                    </button>
+                  </form>
+                  {postcodeError && <p className="mt-2 text-xs text-rose-600">{postcodeError}</p>}
+                  {postcodeResults.length > 0 && (
+                    <p className="mt-2 text-xs text-slate-600">
+                      {postcodeResults.length} price paid records for {postcodeQuery.toUpperCase()}
+                    </p>
+                  )}
+                </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Commute</p>
                   <div className="mt-3 space-y-3">
@@ -711,6 +931,32 @@ export default function App() {
                   </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Rate stress</p>
+                  <div className="mt-3 space-y-2">
+                    <label className="text-xs text-slate-600">
+                      Stress add-on: +{rateStressDelta.toFixed(1)}%
+                    </label>
+                    <input
+                      className="mt-2 w-full"
+                      type="range"
+                      min={0}
+                      max={5}
+                      step={0.25}
+                      value={rateStressDelta}
+                      onChange={(e) => setRateStressDelta(Number(e.target.value))}
+                    />
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                      Stressed mortgage / mo: £{Math.round(stressedMonthlyAtCap).toLocaleString()}
+                      {stressedMonthlyGap !== null && (
+                        <span className="ml-2">
+                          · Budget {stressedMonthlyGap >= 0 ? "▲" : "▼"} £
+                          {Math.abs(Math.round(stressedMonthlyGap)).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Upfront costs</p>
                   <div className="mt-3 space-y-3">
                     <div>
@@ -724,6 +970,7 @@ export default function App() {
                           value={purchasePrice}
                           onChange={(e) => {
                             setPurchasePriceTouched(true);
+                            setSelectedPurchasePrice(null);
                             setPurchasePrice(Number(e.target.value));
                           }}
                         />
@@ -732,7 +979,8 @@ export default function App() {
                           className="rounded-xl border border-emerald-500 bg-emerald-500/20 px-3 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-500/30"
                           onClick={() => {
                             setPurchasePriceTouched(false);
-                            setPurchasePrice(Math.round(maxAffordable));
+                            setSelectedPurchasePrice(null);
+                            setPurchasePrice(Math.round(effectiveMaxPurchase));
                           }}
                         >
                           Use max
@@ -806,6 +1054,14 @@ export default function App() {
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
                       <div className="flex items-center justify-between">
+                        <span>Deposit (10% selected)</span>
+                        <span className="font-semibold">£{selectedDeposit.toLocaleString()}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>Deposit (10% max)</span>
+                        <span className="font-semibold text-slate-600">£{maxDeposit.toLocaleString()}</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
                         <span>Stamp duty</span>
                         <span className="font-semibold">£{stampDuty.toLocaleString()}</span>
                       </div>
@@ -825,45 +1081,93 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs text-slate-600">Property type</label>
-                  <select
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                    value={propertyType}
-                    onChange={(e) => setPropertyType(e.target.value)}
-                  >
-                    <option value="ALL">All property types</option>
-                    <option value="D">Detached</option>
-                    <option value="S">Semi-detached</option>
-                    <option value="T">Terraced</option>
-                    <option value="F">Flat / Maisonette</option>
-                    <option value="O">Other</option>
-                  </select>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <label className="text-xs text-slate-600">Postcode (optional)</label>
-                  <form onSubmit={handlePostcodeSearch} className="mt-1 flex gap-2">
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                      type="text"
-                      placeholder="e.g., NW7 1SP"
-                      value={postcodeQuery}
-                      onChange={(e) => setPostcodeQuery(e.target.value)}
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-xl border border-emerald-500 bg-emerald-500/20 px-4 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/30"
-                    >
-                      Go
-                    </button>
-                  </form>
-                  {postcodeError && <p className="mt-2 text-xs text-rose-600">{postcodeError}</p>}
-                  {postcodeResults.length > 0 && (
-                    <p className="mt-2 text-xs text-slate-600">
-                      {postcodeResults.length} price paid records for {postcodeQuery.toUpperCase()}
-                    </p>
+                <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 text-sm shadow-sm">
+                  <p className="font-semibold text-slate-900">Offer sanity (sold comps)</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Compare your target price to recent sold prices nearby.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Radius</label>
+                      <select
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                        value={compsRadiusKm}
+                        onChange={(e) => setCompsRadiusKm(Number(e.target.value))}
+                      >
+                        <option value={0.5}>0.5 km</option>
+                        <option value={1}>1 km</option>
+                        <option value={2}>2 km</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Recent years</label>
+                      <select
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-inner shadow-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                        value={compsYears}
+                        onChange={(e) => setCompsYears(Number(e.target.value))}
+                      >
+                        <option value={1}>1 year</option>
+                        <option value={2}>2 years</option>
+                        <option value={3}>3 years</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Anchor:{" "}
+                    {compsAnchor?.postcode
+                      ? compsAnchor.postcode
+                      : compsAnchor
+                        ? "Map selection"
+                        : "Click map or search a postcode"}
+                  </div>
+                  {offerCompsError && (
+                    <p className="mt-2 text-[10px] text-rose-500">{offerCompsError}</p>
+                  )}
+                  {offerComps?.count ? (
+                    <div className="mt-3 space-y-2 text-xs text-slate-700">
+                      <div className="flex items-center justify-between">
+                        <span>Sales in window</span>
+                        <span className="font-semibold">{offerComps.count}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Median</span>
+                        <span className="font-semibold">£{Math.round(offerComps.median ?? 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>IQR (25–75%)</span>
+                        <span className="font-semibold">
+                          £{Math.round(offerComps.p25 ?? 0).toLocaleString()} – £{Math.round(offerComps.p75 ?? 0).toLocaleString()}
+                        </span>
+                      </div>
+                      {offerVsMedianPct !== null && (
+                        <div className="text-[11px] text-slate-500">
+                          Offer vs median: {offerVsMedianPct >= 0 ? "+" : ""}
+                          {offerVsMedianPct.toFixed(1)}%
+                        </div>
+                      )}
+                      {offerRisk && (
+                        <div
+                          className={`rounded-xl px-3 py-2 text-[11px] font-semibold ${
+                            offerRisk.tone === "high"
+                              ? "bg-rose-100 text-rose-700"
+                              : offerRisk.tone === "medium"
+                                ? "bg-amber-100 text-amber-700"
+                                : offerRisk.tone === "low"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : offerRisk.tone === "ok"
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {offerRisk.label}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-slate-500">No comps found yet.</p>
                   )}
                 </div>
+
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
@@ -1141,9 +1445,23 @@ export default function App() {
               affordability={{ ...affordability, ...commute }}
               maxAffordable={maxAffordable}
               propertyType={propertyType}
+              tenureFilter={tenureFilter}
               selectedSector={selectedSector}
               councilTaxMonthly={councilTaxMonthly}
               onCouncilTaxUpdate={loadCouncilTax}
+              onNearestSelected={(payload) => {
+                if (!payload) return;
+                setCompsAnchor({
+                  latitude: payload.latitude,
+                  longitude: payload.longitude,
+                  postcode: payload.postcode ?? null,
+                });
+                if (Number.isFinite(payload.price ?? NaN)) {
+                  setSelectedPurchasePrice(payload.price ?? null);
+                  setPurchasePriceTouched(false);
+                  setPurchasePrice(Math.round(payload.price ?? 0));
+                }
+              }}
               onViewportChange={handleViewportChange}
               focusPoint={postcodeLocation}
             />
@@ -1152,6 +1470,55 @@ export default function App() {
               under the Open Government Licence v3.0.
             </div>
           </div>
+
+          <div className="lg:absolute lg:right-6 lg:top-6">
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700"
+              onClick={() => setShowOfferTimeline((prev) => !prev)}
+            >
+              {showOfferTimeline ? "Hide offer readiness" : "Show offer readiness"}
+            </button>
+          </div>
+          {showOfferTimeline && (
+            <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/95 p-4 text-sm shadow-sm lg:absolute lg:right-6 lg:top-16 lg:mt-0 lg:w-72">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Offer timeline</p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">Offer readiness</p>
+              <div className="mt-3 space-y-3 text-xs text-slate-700">
+                {[
+                  { key: "aip", label: "Mortgage in Principle / AIP" },
+                  { key: "funds", label: "Proof of funds" },
+                  { key: "solicitor", label: "Solicitor instructed" },
+                  { key: "id", label: "ID + address verification" },
+                  { key: "notes", label: "Offer notes ready (timelines, fixtures)" },
+                ].map((item, index) => {
+                  const checked = offerChecklist[item.key as keyof typeof offerChecklist];
+                  return (
+                    <div key={item.key} className="relative flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            checked ? "bg-emerald-500" : "bg-slate-300"
+                          }`}
+                        />
+                        {index < 4 && <span className="mt-1 h-full w-px bg-slate-200" />}
+                      </div>
+                      <label className="flex flex-1 items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setOfferChecklist({ ...offerChecklist, [item.key]: e.target.checked })
+                          }
+                        />
+                        <span>{item.label}</span>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

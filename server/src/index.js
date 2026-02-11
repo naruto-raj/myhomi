@@ -17,6 +17,7 @@ import { getRankedSectors } from "./services/rankings.js";
 import { getDataMeta } from "./services/meta.js";
 import { getInflationFactor } from "./services/inflation.js";
 import { getAffordableHeatmap } from "./services/affordableHeatmap.js";
+import { getEpcByPostcode } from "./services/epc.js";
 import {
   computeEffectiveMonthlyBudget,
   getCommuteForOrigins,
@@ -73,6 +74,13 @@ function rateLimit(req, res, next) {
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeTenure(value) {
+  const raw = typeof value === "string" ? value.trim().toUpperCase() : "";
+  if (raw === "FREEHOLD" || raw === "F") return "F";
+  if (raw === "LEASEHOLD" || raw === "L") return "L";
+  return null;
 }
 
 function computeMaxAffordable(affordability) {
@@ -182,8 +190,18 @@ app.get("/api/postcode/latest", async (req, res) => {
         ? ((inflationAdjusted - Number(row.price)) / Number(row.price)) * 100
         : null;
 
+    let epc = null;
+    if (row?.postcode) {
+      try {
+        epc = await getEpcByPostcode(row.postcode);
+      } catch {
+        epc = null;
+      }
+    }
+
     res.json({
       row,
+      epc,
       meta: inflation
         ? {
             price_year: inflation.fromYear,
@@ -235,8 +253,18 @@ app.get("/api/postcode/nearest", async (req, res) => {
         ? ((inflationAdjusted - Number(row.price)) / Number(row.price)) * 100
         : null;
 
+    let epc = null;
+    if (row?.postcode) {
+      try {
+        epc = await getEpcByPostcode(row.postcode);
+      } catch {
+        epc = null;
+      }
+    }
+
     res.json({
       row,
+      epc,
       meta: inflation
         ? {
             price_year: inflation.fromYear,
@@ -285,6 +313,7 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
     };
     const cappedAffordability = applyIncomeCap(affordability);
     const propertyType = typeof req.query.propertyType === "string" ? req.query.propertyType : "ALL";
+    const tenureCode = normalizeTenure(req.query.tenure);
     const maxAffordable = computeMaxAffordable(cappedAffordability);
     const maxAffordableCap = Math.floor(maxAffordable * 1.05);
 
@@ -296,6 +325,7 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
       lat,
       maxAffordableCap,
       propertyType,
+      tenureCode,
       60
     );
     if (!candidates.length) {
@@ -378,9 +408,18 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
     const totalMonthlyCostAdjusted = mortgageMonthly + commuteAdjusted;
     const budgetRemaining = cappedAffordability.monthlyBudget - totalMonthlyCost;
     const budgetRemainingAdjusted = cappedAffordability.monthlyBudget - totalMonthlyCostAdjusted;
+    let epc = null;
+    if (row?.postcode) {
+      try {
+        epc = await getEpcByPostcode(row.postcode);
+      } catch {
+        epc = null;
+      }
+    }
 
     res.json({
       row,
+      epc,
       meta: inflation
         ? {
             price_year: inflation.fromYear,
@@ -432,6 +471,7 @@ app.get("/api/price-paid/viewport", rateLimit, async (req, res) => {
     if (!bboxRaw) {
       return res.status(400).json({ error: "bbox is required" });
     }
+    const tenureCode = normalizeTenure(req.query.tenure);
     const parts = bboxRaw.split(",").map((value) => Number(value.trim()));
     if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value))) {
       return res.status(400).json({ error: "bbox must be minLng,minLat,maxLng,maxLat" });
@@ -442,14 +482,81 @@ app.get("/api/price-paid/viewport", rateLimit, async (req, res) => {
       return res.status(400).json({ error: "bbox is too large" });
     }
     const limit = Math.min(Number(req.query.limit || 2000), 5000);
-    const cacheKey = `price-paid:${bboxRaw}:${limit}`;
+    const cacheKey = `price-paid:${bboxRaw}:${limit}:${tenureCode || "ALL"}`;
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
-    const rows = await getPricePaidInViewport(parts, limit);
+    const rows = await getPricePaidInViewport(parts, limit, tenureCode);
     setCache(cacheKey, { rows }, 10_000);
     res.json({ rows });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to fetch viewport data" });
+  }
+});
+
+app.get("/api/price-paid/comps", rateLimit, async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ error: "lat and lng are required" });
+    }
+    const radiusKmRaw = Number(req.query.radiusKm ?? 1);
+    const yearsRaw = Number(req.query.years ?? 2);
+    const limitRaw = Number(req.query.limit ?? 2000);
+    const radiusKm = Math.min(Math.max(radiusKmRaw, 0.2), 3);
+    const years = Math.min(Math.max(Math.round(yearsRaw), 1), 5);
+    const limit = Math.min(Math.max(Math.round(limitRaw), 200), 5000);
+    const tenureCode = normalizeTenure(req.query.tenure);
+    const filterTenure = Boolean(tenureCode);
+    const radiusMeters = radiusKm * 1000;
+    const radiusDegrees = radiusKm / 111;
+
+    const { rows } = await pool.query(
+      `
+        WITH params AS (
+          SELECT
+            ST_SetSRID(ST_MakePoint($1, $2), 4326) AS center_geom,
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography AS center_geo
+        ),
+        nearby AS (
+          SELECT
+            pp.price,
+            pp.date_of_transfer
+          FROM price_paid pp
+          JOIN postcode_coords pc
+            ON pc.postcode_norm = pp.postcode_norm
+          WHERE pc.geom && ST_Expand((SELECT center_geom FROM params), $3)
+            AND ST_DWithin(pc.geom::geography, (SELECT center_geo FROM params), $4)
+            AND pp.price IS NOT NULL
+            AND pp.date_of_transfer >= (CURRENT_DATE - ($5::text || ' years')::interval)
+            AND ($6::boolean = false OR pp.duration = $7::text)
+          LIMIT $8
+        )
+        SELECT
+          COUNT(*)::int AS count,
+          percentile_cont(0.25) WITHIN GROUP (ORDER BY price) AS p25,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY price) AS median,
+          percentile_cont(0.75) WITHIN GROUP (ORDER BY price) AS p75,
+          AVG(price)::int AS avg,
+          MIN(price)::int AS min,
+          MAX(price)::int AS max,
+          MAX(date_of_transfer) AS latest_date
+        FROM nearby;
+      `,
+      [lng, lat, radiusDegrees, radiusMeters, years, filterTenure, tenureCode, limit]
+    );
+
+    const stats = rows[0] || null;
+    res.json({
+      stats,
+      meta: {
+        radius_km: radiusKm,
+        years,
+        limit,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch comps" });
   }
 });
 
@@ -597,6 +704,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       minSchools: safeNumber(filters?.minSchools ?? 0),
       maxCrime: safeNumber(filters?.maxCrime ?? 100),
     };
+    const safeTenure = normalizeTenure(req.body?.tenure);
     const safePropertyType =
       typeof propertyType === "string" && propertyType.trim() !== ""
         ? propertyType.trim().toUpperCase()
@@ -607,7 +715,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
 
     const cacheKey = `rank:${derivedScope}:${JSON.stringify(bbox)}:${JSON.stringify(cappedAffordability)}:${JSON.stringify(
       safeFilters
-    )}:${JSON.stringify(safePriorities)}:${safePropertyType}:${limit}`;
+    )}:${JSON.stringify(safePriorities)}:${safePropertyType}:${safeTenure || "ALL"}:${limit}`;
     const cached = getCache(cacheKey);
     if (cached && cached.meta != null) return res.json(cached);
 
@@ -623,6 +731,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       filters: safeFilters,
       priorities: safePriorities,
       propertyType: safePropertyType,
+      tenure: safeTenure,
       limit: prefetchLimit,
     });
 
@@ -706,6 +815,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
         ...(result.meta || {}),
         affordability_cap: maxPriceCap,
         property_type: safePropertyType,
+        tenure: safeTenure || "ALL",
         zoom: Number(zoom),
         commute: commuteMeta,
         empty_reason: result.rows.length
@@ -720,6 +830,7 @@ app.post("/api/sector-rankings", rateLimit, async (req, res) => {
       payload.meta = {
         affordability_cap: maxPriceCap,
         property_type: safePropertyType,
+        tenure: safeTenure || "ALL",
         zoom: Number(zoom),
         commute: commuteMeta,
         empty_reason: cappedAffordability.workplacePostcode
@@ -767,6 +878,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       typeof propertyType === "string" && propertyType.trim() !== ""
         ? propertyType.trim().toUpperCase()
         : "ALL";
+    const safeTenure = normalizeTenure(req.body?.tenure);
 
     if (!Number.isFinite(maxPriceCap) || maxPriceCap <= 0) {
       return res.json({
@@ -775,12 +887,13 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
         meta: {
           affordability_cap: maxPriceCap,
           property_type: safePropertyType,
+          tenure: safeTenure || "ALL",
           zoom: Number(zoom),
         },
       });
     }
 
-    const cacheKey = `affordable-heatmap:${zoom}:${bbox.join(",")}:${maxPriceCap}:${safePropertyType}:${JSON.stringify(
+    const cacheKey = `affordable-heatmap:${zoom}:${bbox.join(",")}:${maxPriceCap}:${safePropertyType}:${safeTenure || "ALL"}:${JSON.stringify(
       cappedAffordability
     )}:${limit}`;
     const cached = getCache(cacheKey);
@@ -802,8 +915,9 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
             WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
               AND price_adj <= $5
               AND ($6::text = 'ALL' OR property_type = $6::text)
+              AND ($7::boolean = false OR duration = $8::text)
             ORDER BY price_adj ASC
-            LIMIT $7;
+            LIMIT $9;
           `,
           [
             minLng,
@@ -812,6 +926,8 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
             maxLat,
             maxPriceCap,
             safePropertyType,
+            Boolean(safeTenure),
+            safeTenure,
             Math.min(Number(limit), 5000),
           ]
         );
@@ -820,12 +936,13 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
           return res.json({
             mode: "points",
             rows: [],
-            meta: {
-              affordability_cap: maxPriceCap,
-              property_type: safePropertyType,
-              zoom: Number(zoom),
-            },
-          });
+          meta: {
+            affordability_cap: maxPriceCap,
+            property_type: safePropertyType,
+            tenure: safeTenure || "ALL",
+            zoom: Number(zoom),
+          },
+        });
         }
 
         const commuteOrigins = rawPoints.map((point) => ({
@@ -884,6 +1001,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
           meta: {
             affordability_cap: maxPriceCap,
             property_type: safePropertyType,
+            tenure: safeTenure || "ALL",
             zoom: Number(zoom),
             commute: commuteResult.meta ?? null,
           },
@@ -899,6 +1017,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
         filters: { maxCommute: 0, minSchools: 0, maxCrime: 100 },
         priorities: ["price"],
         propertyType: safePropertyType,
+        tenure: safeTenure,
         limit: Math.min(Number(limit), 1500),
       });
       const commuteResult = await getCommuteForSectors({
@@ -968,6 +1087,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       bbox,
       maxPriceCap,
       propertyType: safePropertyType,
+      tenure: safeTenure,
       zoom: Number(zoom),
       pointZoomThreshold: Number(process.env.HEATMAP_POINT_ZOOM || 10),
       limit: Math.min(Number(limit), 10000),
@@ -977,6 +1097,7 @@ app.post("/api/affordable-heatmap", rateLimit, async (req, res) => {
       meta: {
         affordability_cap: maxPriceCap,
         property_type: safePropertyType,
+        tenure: safeTenure || "ALL",
         zoom: Number(zoom),
       },
     };

@@ -12,6 +12,7 @@ export async function getAffordableHeatmap({
   bbox,
   maxPriceCap,
   propertyType,
+  tenure,
   zoom,
   pointZoomThreshold = 10,
   limit = 5000,
@@ -30,10 +31,21 @@ export async function getAffordableHeatmap({
         WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
           AND price_adj <= $5
           AND ($6::text = 'ALL' OR property_type = $6::text)
+          AND ($7::boolean = false OR duration = $8::text)
         ORDER BY price_adj ASC
-        LIMIT $7;
+        LIMIT $9;
       `,
-      [minLng, minLat, maxLng, maxLat, maxPriceCap, propertyType || "ALL", limit]
+      [
+        minLng,
+        minLat,
+        maxLng,
+        maxLat,
+        maxPriceCap,
+        propertyType || "ALL",
+        Boolean(tenure && tenure !== "ALL"),
+        tenure || "ALL",
+        limit,
+      ]
     );
     return { mode: "points", rows };
   }
@@ -52,11 +64,23 @@ export async function getAffordableHeatmap({
       WHERE geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
         AND price_adj <= $5
         AND ($7::text = 'ALL' OR property_type = $7::text)
+        AND ($8::boolean = false OR duration = $9::text)
       GROUP BY lng_bin, lat_bin
       ORDER BY weight DESC
-      LIMIT $8;
+      LIMIT $10;
     `,
-    [minLng, minLat, maxLng, maxLat, maxPriceCap, gridSize, propertyType || "ALL", limit]
+    [
+      minLng,
+      minLat,
+      maxLng,
+      maxLat,
+      maxPriceCap,
+      gridSize,
+      propertyType || "ALL",
+      Boolean(tenure && tenure !== "ALL"),
+      tenure || "ALL",
+      limit,
+    ]
   );
   return { mode: "grid", rows, gridSize };
 }

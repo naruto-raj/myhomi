@@ -31,6 +31,9 @@ services:
       ZOOM_THRESHOLD: ${ZOOM_THRESHOLD:-8}
       TFL_APP_ID: ${TFL_APP_ID}
       TFL_APP_KEY: ${TFL_APP_KEY}
+      EPC_API_EMAIL: ${EPC_API_EMAIL}
+      EPC_API_KEY: ${EPC_API_KEY}
+      EPC_CACHE_TTL_DAYS: ${EPC_CACHE_TTL_DAYS:-30}
     ports:
       - "5050:5050"
     volumes:
