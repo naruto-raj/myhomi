@@ -1,0 +1,17 @@
+FROM postgres:15-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       postgis \
+       postgresql-15-postgis-3 \
+       postgresql-15-postgis-3-scripts \
+    && rm -rf /var/lib/apt/lists/*
+
+# Auto-enable PostGIS in the default database on first init.
+# Postgres runs files in /docker-entrypoint-initdb.d/ once, when the
+# data volume is first created.
+RUN mkdir -p /docker-entrypoint-initdb.d \
+ && printf '%s\n%s\n' \
+        'CREATE EXTENSION IF NOT EXISTS postgis;' \
+        'CREATE EXTENSION IF NOT EXISTS postgis_topology;' \
+        > /docker-entrypoint-initdb.d/10-postgis.sql

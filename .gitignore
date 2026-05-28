@@ -5,3 +5,13 @@ server/.env
 .DS_Store
 data/
 node_modules/
+
+# Claude Code local state (worktrees, session data) — never commit
+.claude/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db

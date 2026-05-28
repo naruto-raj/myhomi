@@ -1,6 +1,15 @@
 services:
   db:
-    image: postgis/postgis:15-3.4
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    # DB_PLATFORM is auto-detected and written to .env by scripts/setup.sh
+    # (and scripts/setup.ps1). It pins the build/runtime to the host arch
+    # so Apple Silicon Macs get native arm64 (no Rosetta) and Intel/Windows
+    # hosts get amd64. If you run `docker compose up` directly without the
+    # setup script, the fallback is linux/amd64 (works everywhere, but
+    # emulated on Apple Silicon — re-run setup.sh to fix).
+    platform: ${DB_PLATFORM:-linux/amd64}
     container_name: housing-map-db
     shm_size: "1g"
     environment:

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "csv-parse";
 import dotenv from "dotenv";
 import pg from "pg";
+import { from as copyFrom } from "pg-copy-streams";
 
 const { Pool } = pg;
 
@@ -40,46 +41,76 @@ function findColumnIndex(headers, candidates) {
   return -1;
 }
 
+// Escape a value for Postgres COPY text format (tab-delimited).
+// Backslash, tab, newline, carriage return must be escaped.
+function copyEscape(value) {
+  if (value === null || value === undefined || value === "") return "\\N";
+  return String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\t/g, "\\t")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r");
+}
+
 async function ingest() {
   await ensureSchema();
   const client = await pool.connect();
   let count = 0;
+  const t0 = Date.now();
 
   try {
+    // Stage data in a TEMP table first, then INSERT...SELECT into the
+    // real tables with the geometry computed in SQL. ~100x faster than
+    // per-row INSERTs.
     await client.query("BEGIN");
+    await client.query(`
+      CREATE TEMP TABLE postcode_stage (
+        postcode TEXT,
+        postcode_norm TEXT,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        lad_code TEXT
+      ) ON COMMIT DROP;
+    `);
 
+    // First pass: read headers synchronously to detect column positions.
+    // We use a small synchronous parser by streaming until we get the
+    // first record, then continue with COPY.
+    const headerParser = fs
+      .createReadStream(csvPath)
+      .pipe(parse({ relax_quotes: true, relax_column_count: true, trim: true, to_line: 1 }));
+    let headers = null;
+    for await (const record of headerParser) {
+      headers = record.map((value) => String(value).trim().toLowerCase());
+      break;
+    }
+    if (!headers) throw new Error("Empty CSV");
+
+    const postcodeIdx = findColumnIndex(headers, ["pcds", "pcd", "postcode"]);
+    const latIdx = findColumnIndex(headers, ["lat", "latitude"]);
+    const lonIdx = findColumnIndex(headers, ["long", "longitude", "lon", "lng"]);
+    const ladIdx = findColumnIndex(headers, ["lad25cd", "ladcd"]);
+
+    if (postcodeIdx === -1 || latIdx === -1 || lonIdx === -1) {
+      throw new Error(
+        "Could not detect required columns. Set POSTCODE_CSV with columns pcds/pcd, lat, long."
+      );
+    }
+
+    // Open a COPY stream into the staging table.
+    const copyStream = client.query(
+      copyFrom(
+        `COPY postcode_stage (postcode, postcode_norm, latitude, longitude, lad_code) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')`
+      )
+    );
+
+    // Stream the rest of the CSV (skipping header) and push tab-delimited
+    // rows into the COPY stream. Apply backpressure properly.
     const parser = fs
       .createReadStream(csvPath)
-      .pipe(
-        parse({
-          relax_quotes: true,
-          relax_column_count: true,
-          trim: true,
-        })
-      );
-
-    let headers = null;
-    let postcodeIdx = -1;
-    let latIdx = -1;
-    let lonIdx = -1;
-    let ladIdx = -1;
+      .pipe(parse({ relax_quotes: true, relax_column_count: true, trim: true, from_line: 2 }));
 
     for await (const record of parser) {
-      if (!headers) {
-        headers = record.map((value) => String(value).trim().toLowerCase());
-        postcodeIdx = findColumnIndex(headers, ["pcds", "pcd", "postcode"]);
-        latIdx = findColumnIndex(headers, ["lat", "latitude"]);
-        lonIdx = findColumnIndex(headers, ["long", "longitude", "lon", "lng"]);
-        ladIdx = findColumnIndex(headers, ["lad25cd", "ladcd"]);
-
-        if (postcodeIdx === -1 || latIdx === -1 || lonIdx === -1) {
-          throw new Error(
-            "Could not detect required columns. Set POSTCODE_CSV with columns pcds/pcd, lat, long."
-          );
-        }
-        continue;
-      }
-
       const postcode = String(record[postcodeIdx] || "").trim();
       const lat = Number(record[latIdx]);
       const lon = Number(record[lonIdx]);
@@ -88,42 +119,57 @@ async function ingest() {
       if (!postcode || !Number.isFinite(lat) || !Number.isFinite(lon)) {
         continue;
       }
-
       const postcodeNorm = postcode.replace(/\s+/g, "").toUpperCase();
 
-      await client.query(
-        `
-          INSERT INTO postcode_coords (
-            postcode,
-            postcode_norm,
-            latitude,
-            longitude,
-            geom
-          ) VALUES ($1, $2, $3, $4, ST_SetSRID(ST_MakePoint($4, $3), 4326))
-          ON CONFLICT (postcode) DO NOTHING;
-        `,
-        [postcode, postcodeNorm, lat, lon]
-      );
+      const line =
+        copyEscape(postcode) +
+        "\t" +
+        copyEscape(postcodeNorm) +
+        "\t" +
+        lat +
+        "\t" +
+        lon +
+        "\t" +
+        copyEscape(ladCode) +
+        "\n";
 
-      if (ladCode) {
-        await client.query(
-          `
-            INSERT INTO postcode_lad (
-              postcode_norm,
-              lad_code
-            ) VALUES ($1, $2)
-            ON CONFLICT (postcode_norm) DO UPDATE SET lad_code = EXCLUDED.lad_code;
-          `,
-          [postcodeNorm, ladCode]
-        );
+      if (!copyStream.write(line)) {
+        await new Promise((resolve) => copyStream.once("drain", resolve));
       }
-
       count += 1;
-      if (count % 5000 === 0) {
-        await client.query("COMMIT");
-        await client.query("BEGIN");
+      if (count % 200000 === 0) {
+        console.log(`  streamed ${count.toLocaleString()} rows...`);
       }
     }
+
+    copyStream.end();
+    await new Promise((resolve, reject) => {
+      copyStream.on("finish", resolve);
+      copyStream.on("error", reject);
+    });
+
+    console.log(`Staged ${count.toLocaleString()} rows in ${(Date.now() - t0) / 1000}s. Merging...`);
+
+    // Merge staging → real tables (single SQL statement each).
+    await client.query(`
+      INSERT INTO postcode_coords (postcode, postcode_norm, latitude, longitude, geom)
+      SELECT DISTINCT ON (postcode)
+        postcode,
+        postcode_norm,
+        latitude,
+        longitude,
+        ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography
+      FROM postcode_stage
+      ON CONFLICT (postcode) DO NOTHING;
+    `);
+
+    await client.query(`
+      INSERT INTO postcode_lad (postcode_norm, lad_code)
+      SELECT DISTINCT ON (postcode_norm) postcode_norm, lad_code
+      FROM postcode_stage
+      WHERE lad_code IS NOT NULL AND lad_code <> ''
+      ON CONFLICT (postcode_norm) DO UPDATE SET lad_code = EXCLUDED.lad_code;
+    `);
 
     await client.query("COMMIT");
   } catch (err) {
@@ -133,7 +179,12 @@ async function ingest() {
     client.release();
   }
 
-  console.log(`Ingested ${count} rows from ${csvPath}`);
+  console.log(
+    `Ingested ${count.toLocaleString()} rows from ${csvPath} in ${(
+      (Date.now() - t0) /
+      1000
+    ).toFixed(1)}s`
+  );
 }
 
 ingest()
