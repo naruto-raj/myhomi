@@ -43,12 +43,34 @@ else
   trap 'rm -rf "$TMP_DIR"' EXIT
   curl -L --fail "$ONS_URL" -o "$TMP_DIR/ons.zip"
   unzip -q "$TMP_DIR/ons.zip" -d "$TMP_DIR/ons"
-  FIRST_CSV="$(find "$TMP_DIR/ons" -type f -name '*.csv' | head -n 1)"
-  if [[ -z "$FIRST_CSV" ]]; then
-    echo "[error] No CSV found inside ONS zip" >&2
+
+  # The ZIP contains many CSVs: a few small geography-classification lookups
+  # plus the actual postcode directory (named ONSPD_*.csv, ~1 GB). The right
+  # one lives in a Data/ subfolder and has 'pcds'/'lat'/'long' columns.
+  # Strategy: prefer ONSPD_* by name; fall back to the largest CSV.
+  ONSPD_CSV="$(find "$TMP_DIR/ons" -type f -iname 'ONSPD_*.csv' | head -n 1)"
+  if [[ -z "$ONSPD_CSV" ]]; then
+    # Fallback: pick the largest CSV (the directory is dramatically bigger
+    # than every lookup table).
+    ONSPD_CSV="$(find "$TMP_DIR/ons" -type f -name '*.csv' -print0 \
+      | xargs -0 stat -f '%z %N' 2>/dev/null \
+      | sort -nr | head -n 1 | cut -d' ' -f2-)"
+    # GNU stat fallback (Linux)
+    if [[ -z "$ONSPD_CSV" ]]; then
+      ONSPD_CSV="$(find "$TMP_DIR/ons" -type f -name '*.csv' -printf '%s %p\n' 2>/dev/null \
+        | sort -nr | head -n 1 | cut -d' ' -f2-)"
+    fi
+  fi
+
+  if [[ -z "$ONSPD_CSV" || ! -f "$ONSPD_CSV" ]]; then
+    echo "[error] Could not locate the ONS Postcode Directory CSV inside the zip." >&2
+    echo "[error] Contents:" >&2
+    find "$TMP_DIR/ons" -type f -name '*.csv' >&2
     exit 1
   fi
-  cp "$FIRST_CSV" "$ONS_FILE"
+
+  echo "[info] Selected: $(basename "$ONSPD_CSV") ($(du -h "$ONSPD_CSV" | cut -f1))"
+  cp "$ONSPD_CSV" "$ONS_FILE"
   echo "[ok] $ONS_FILE"
 fi
 

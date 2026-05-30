@@ -43,11 +43,22 @@ if ((Test-Path $OnsFile) -and -not $Force) {
         $ZipPath = Join-Path $TmpDir "ons.zip"
         Invoke-WebRequest -Uri $OnsUrl -OutFile $ZipPath
         Expand-Archive -Path $ZipPath -DestinationPath (Join-Path $TmpDir "ons") -Force
-        $FirstCsv = Get-ChildItem -Path (Join-Path $TmpDir "ons") -Filter *.csv -Recurse | Select-Object -First 1
-        if (-not $FirstCsv) {
-            throw "No CSV found inside ONS zip"
+
+        # The ZIP contains many CSVs: small geography-classification lookups
+        # plus the actual postcode directory (named ONSPD_*.csv, ~1 GB).
+        # Prefer ONSPD_* by name; fall back to the largest CSV.
+        $AllCsvs = Get-ChildItem -Path (Join-Path $TmpDir "ons") -Filter *.csv -Recurse
+        $OnspdCsv = $AllCsvs | Where-Object { $_.Name -like 'ONSPD_*' } | Select-Object -First 1
+        if (-not $OnspdCsv) {
+            $OnspdCsv = $AllCsvs | Sort-Object Length -Descending | Select-Object -First 1
         }
-        Copy-Item -Path $FirstCsv.FullName -Destination $OnsFile -Force
+        if (-not $OnspdCsv) {
+            throw "Could not locate the ONS Postcode Directory CSV inside the zip."
+        }
+
+        $SizeMb = [math]::Round($OnspdCsv.Length / 1MB, 1)
+        Write-Host "[info] Selected: $($OnspdCsv.Name) ($SizeMb MB)"
+        Copy-Item -Path $OnspdCsv.FullName -Destination $OnsFile -Force
         Write-Host "[ok] $OnsFile"
     } finally {
         Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue

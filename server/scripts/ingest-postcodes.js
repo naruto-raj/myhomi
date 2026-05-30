@@ -81,7 +81,11 @@ async function ingest() {
       .pipe(parse({ relax_quotes: true, relax_column_count: true, trim: true, to_line: 1 }));
     let headers = null;
     for await (const record of headerParser) {
-      headers = record.map((value) => String(value).trim().toLowerCase());
+      headers = record.map((value) => {
+        // Strip UTF-8 BOM that ONS sometimes ships on the first column header,
+        // then trim + lowercase for case-insensitive matching.
+        return String(value).replace(/^﻿/, "").trim().toLowerCase();
+      });
       break;
     }
     if (!headers) throw new Error("Empty CSV");
@@ -89,11 +93,24 @@ async function ingest() {
     const postcodeIdx = findColumnIndex(headers, ["pcds", "pcd", "postcode"]);
     const latIdx = findColumnIndex(headers, ["lat", "latitude"]);
     const lonIdx = findColumnIndex(headers, ["long", "longitude", "lon", "lng"]);
-    const ladIdx = findColumnIndex(headers, ["lad25cd", "ladcd"]);
+    // Try common LAD column names across ONSPD vintages (LAD25CD, LAD24CD, …).
+    const ladIdx = findColumnIndex(headers, [
+      "lad25cd", "lad24cd", "lad23cd", "lad22cd", "lad21cd", "lad20cd", "ladcd", "oslaua",
+    ]);
 
     if (postcodeIdx === -1 || latIdx === -1 || lonIdx === -1) {
+      const missing = [];
+      if (postcodeIdx === -1) missing.push("postcode (one of: pcds, pcd, postcode)");
+      if (latIdx === -1) missing.push("latitude (one of: lat, latitude)");
+      if (lonIdx === -1) missing.push("longitude (one of: long, longitude, lon, lng)");
       throw new Error(
-        "Could not detect required columns. Set POSTCODE_CSV with columns pcds/pcd, lat, long."
+        `Could not detect required columns in ${csvPath}.\n` +
+          `  Missing: ${missing.join("; ")}\n` +
+          `  Found columns: ${headers.join(", ")}\n` +
+          `\n` +
+          `  This usually means the wrong CSV got selected from the ONS zip.\n` +
+          `  The correct file is named ONSPD_<MONTH>_<YEAR>_UK.csv and is ~1 GB.\n` +
+          `  Re-run:  ./scripts/download-data.sh --force  (or  -Force on Windows)`
       );
     }
 
