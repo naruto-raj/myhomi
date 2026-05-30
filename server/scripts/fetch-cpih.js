@@ -85,6 +85,7 @@ async function fetchCpih() {
     throw new Error("No CPIH data rows parsed. Check CSV format or URL.");
   }
 
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(annual, null, 2) + "\n", "utf-8");
   const years = Object.keys(annual);
   const latestYear = years.length ? years[years.length - 1] : "n/a";
