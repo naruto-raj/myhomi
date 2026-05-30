@@ -18,6 +18,16 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is not set");
 }
 
+// Council tax data is OPTIONAL and requires a manual download from gov.uk /
+// gov.wales (no stable URL). If the file isn't there, exit cleanly with a
+// pointer to the docs — don't crash the whole setup pipeline.
+if (!fs.existsSync(csvPath)) {
+  console.log(`[skip] Council tax CSV not found: ${csvPath}`);
+  console.log(`       This step is optional. To enable the council-tax overlay,`);
+  console.log(`       see README.md → 'Optional data (council tax)'.`);
+  process.exit(0);
+}
+
 const pool = new Pool({ connectionString: databaseUrl });
 
 const __filename = fileURLToPath(import.meta.url);
