@@ -64,9 +64,13 @@ export async function fetchTflJourney({ origin, destination }) {
   const to = `${destination.lat},${destination.lng}`;
   const url = new URL(`${TFL_BASE_URL}/Journey/JourneyResults/${from}/to/${to}`);
   url.searchParams.set("journeyPreference", "LeastTime");
+  // Modes must match TfL's accepted set exactly. Common gotchas:
+  //   - "train" is NOT valid; use "national-rail"
+  //   - "river" is NOT valid; use "river-bus"
+  // "elizabeth-line" was added in 2022 and is essential for east-west routing.
   url.searchParams.append(
     "mode",
-    "bus,tube,dlr,overground,train,tram,walking,river,coach"
+    "bus,tube,dlr,overground,elizabeth-line,national-rail,tram,river-bus,walking,coach"
   );
   if (TFL_APP_ID) url.searchParams.set("app_id", TFL_APP_ID);
   if (TFL_APP_KEY) url.searchParams.set("app_key", TFL_APP_KEY);
