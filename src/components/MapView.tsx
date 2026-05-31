@@ -700,23 +700,10 @@ export default function MapView({
             16,
             140,
           ],
-          // Fade out at high zoom so the discrete sector-point circles
-          // (which fade IN at the same range) become the primary visual.
-          "heatmap-opacity": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            5,
-            0.9,
-            12,
-            0.9,
-            13,
-            0.7,
-            14,
-            0.45,
-            15,
-            0.25,
-          ],
+          // Constant opacity — the heatmap is the visualization at every
+          // zoom level. Sector circles only show when the user explicitly
+          // turns them on via the 'Show centroids' toggle.
+          "heatmap-opacity": 0.9,
           "heatmap-color": [
             "interpolate",
             ["linear"],
@@ -767,35 +754,9 @@ export default function MapView({
             1,
             "#facc15",
           ],
-          // Auto-fade IN past zoom 12 so discrete sector circles take over
-          // from the heatmap at street view. Invisible (alpha=0) below zoom
-          // 11 so the heatmap owns the country/city visualization. The
-          // visibility effect below still hides the layer entirely at low
-          // zoom unless the manual "Show centroids" toggle overrides.
-          "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            10,
-            0,
-            12,
-            0.6,
-            14,
-            0.85,
-          ],
+          "circle-opacity": 0.75,
           "circle-stroke-color": "#0f172a",
           "circle-stroke-width": 1,
-          "circle-stroke-opacity": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            10,
-            0,
-            12,
-            0.6,
-            14,
-            0.9,
-          ],
         },
       });
 
@@ -995,26 +956,13 @@ export default function MapView({
     if (map.getLayer("best-fit-heat")) {
       map.setLayoutProperty("best-fit-heat", "visibility", showBestFit ? "visible" : "none");
     }
-
-    // Sector centroids: visible at all zooms when the manual toggle is on,
-    // and ALWAYS visible at zoom ≥ 12 regardless of the toggle. The reason:
-    // the heatmap fades out past zoom 12, so without the centroids the map
-    // would look empty at street view even when affordable properties exist.
-    const SECTOR_AUTO_ZOOM = 12;
-    const updateSectorVisibility = () => {
-      if (!map.getLayer("sector-points")) return;
-      const shouldShow = showCentroids || map.getZoom() >= SECTOR_AUTO_ZOOM;
+    if (map.getLayer("sector-points")) {
       map.setLayoutProperty(
         "sector-points",
         "visibility",
-        shouldShow ? "visible" : "none"
+        showCentroids ? "visible" : "none"
       );
-    };
-    updateSectorVisibility();
-    map.on("zoomend", updateSectorVisibility);
-    return () => {
-      map.off("zoomend", updateSectorVisibility);
-    };
+    }
   }, [showHeatmap, showCentroids, showBestFit]);
 
   useEffect(() => {
