@@ -865,9 +865,21 @@ export default function MapView({
           interactiveLayers.push("sector-points");
         }
         if (interactiveLayers.length) {
-          const features = map.queryRenderedFeatures(event.point, {
-            layers: interactiveLayers,
-          });
+          // Query a generous box around the click, not a single pixel. Users
+          // shouldn't have to land exactly on a heatmap blob or centroid
+          // dot — "near enough" should count. 28 px ≈ a fingertip on touch
+          // and a comfortable mouse tolerance on desktop. It's still small
+          // relative to the rendered heatmap radius (48–140 px depending on
+          // zoom), so the gate still kills clicks in genuinely empty space.
+          const TOLERANCE_PX = 28;
+          const { x, y } = event.point;
+          const features = map.queryRenderedFeatures(
+            [
+              [x - TOLERANCE_PX, y - TOLERANCE_PX],
+              [x + TOLERANCE_PX, y + TOLERANCE_PX],
+            ],
+            { layers: interactiveLayers }
+          );
           if (features.length === 0) return;
         }
 
