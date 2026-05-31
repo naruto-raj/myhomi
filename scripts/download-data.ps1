@@ -44,20 +44,37 @@ if ((Test-Path $OnsFile) -and -not $Force) {
         Invoke-WebRequest -Uri $OnsUrl -OutFile $ZipPath
         Expand-Archive -Path $ZipPath -DestinationPath (Join-Path $TmpDir "ons") -Force
 
-        # The ZIP contains many CSVs: small geography-classification lookups
-        # plus the actual postcode directory (named ONSPD_*.csv, ~1 GB).
-        # Prefer ONSPD_* by name; fall back to the largest CSV.
-        $AllCsvs = Get-ChildItem -Path (Join-Path $TmpDir "ons") -Filter *.csv -Recurse
-        $OnspdCsv = $AllCsvs | Where-Object { $_.Name -like 'ONSPD_*' } | Select-Object -First 1
-        if (-not $OnspdCsv) {
-            $OnspdCsv = $AllCsvs | Sort-Object Length -Descending | Select-Object -First 1
+        # The ZIP contains many CSVs: small lookups (sector centroids, outward
+        # codes, geography classifications) plus the actual postcode directory
+        # (~1 GB). Multiple files share the ONSPD_* prefix, so name matching
+        # is unreliable. Pick the LARGEST CSV — the directory dwarfs every
+        # lookup by 100x+.
+        $AllCsvs = Get-ChildItem -Path (Join-Path $TmpDir "ons") -Filter *.csv -Recurse | Sort-Object Length -Descending
+        if (-not $AllCsvs) {
+            throw "No CSV files found inside ONS zip"
         }
-        if (-not $OnspdCsv) {
-            throw "Could not locate the ONS Postcode Directory CSV inside the zip."
+
+        Write-Host "[info] CSVs found in zip (size):"
+        foreach ($csv in $AllCsvs) {
+            $sz = [math]::Round($csv.Length / 1MB, 1)
+            Write-Host ("       {0,8} MB  {1}" -f $sz, $csv.FullName)
+        }
+
+        $OnspdCsv = $AllCsvs | Select-Object -First 1
+
+        # Validate: the directory MUST have lat/long columns.
+        $HeaderLine = (Get-Content $OnspdCsv.FullName -TotalCount 1).ToLower() -replace "`r", ""
+        $hasLat  = $HeaderLine -match '(^|,)"?(lat|latitude)"?(,|$)'
+        $hasLong = $HeaderLine -match '(^|,)"?(long|longitude|lon|lng)"?(,|$)'
+        if (-not ($hasLat -and $hasLong)) {
+            Write-Host "[error] The largest CSV in the zip doesn't have lat/long columns." -ForegroundColor Red
+            Write-Host "[error] Selected: $($OnspdCsv.FullName)" -ForegroundColor Red
+            Write-Host "[error] Header  : $(($HeaderLine).Substring(0, [math]::Min(400, $HeaderLine.Length)))" -ForegroundColor Red
+            throw "ONS zip layout has changed. File an issue."
         }
 
         $SizeMb = [math]::Round($OnspdCsv.Length / 1MB, 1)
-        Write-Host "[info] Selected: $($OnspdCsv.Name) ($SizeMb MB)"
+        Write-Host "[info] Selected: $($OnspdCsv.Name) ($SizeMb MB) -- has lat/long"
         Copy-Item -Path $OnspdCsv.FullName -Destination $OnsFile -Force
         Write-Host "[ok] $OnsFile"
     } finally {

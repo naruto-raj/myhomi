@@ -44,32 +44,42 @@ else
   curl -L --fail "$ONS_URL" -o "$TMP_DIR/ons.zip"
   unzip -q "$TMP_DIR/ons.zip" -d "$TMP_DIR/ons"
 
-  # The ZIP contains many CSVs: a few small geography-classification lookups
-  # plus the actual postcode directory (named ONSPD_*.csv, ~1 GB). The right
-  # one lives in a Data/ subfolder and has 'pcds'/'lat'/'long' columns.
-  # Strategy: prefer ONSPD_* by name; fall back to the largest CSV.
-  ONSPD_CSV="$(find "$TMP_DIR/ons" -type f -iname 'ONSPD_*.csv' | head -n 1)"
-  if [[ -z "$ONSPD_CSV" ]]; then
-    # Fallback: pick the largest CSV (the directory is dramatically bigger
-    # than every lookup table).
-    ONSPD_CSV="$(find "$TMP_DIR/ons" -type f -name '*.csv' -print0 \
-      | xargs -0 stat -f '%z %N' 2>/dev/null \
-      | sort -nr | head -n 1 | cut -d' ' -f2-)"
-    # GNU stat fallback (Linux)
-    if [[ -z "$ONSPD_CSV" ]]; then
-      ONSPD_CSV="$(find "$TMP_DIR/ons" -type f -name '*.csv' -printf '%s %p\n' 2>/dev/null \
-        | sort -nr | head -n 1 | cut -d' ' -f2-)"
-    fi
+  # The ZIP contains many CSVs: a few small lookups (sector centroids,
+  # outward-code lookups, geography classifications) plus the actual postcode
+  # directory (~1 GB). Multiple files share the ONSPD_* prefix, so name
+  # matching is unreliable. Heuristic: pick the LARGEST CSV — the directory
+  # dwarfs every lookup by 100×+.
+  CANDIDATES_LIST="$TMP_DIR/csv_list.txt"
+  # Try BSD stat (macOS) first, then GNU stat (Linux). Output: "<bytes>\t<path>".
+  if find "$TMP_DIR/ons" -type f -name '*.csv' -exec stat -f '%z	%N' {} + 2>/dev/null > "$CANDIDATES_LIST" && [[ -s "$CANDIDATES_LIST" ]]; then
+    :
+  else
+    find "$TMP_DIR/ons" -type f -name '*.csv' -exec stat -c '%s	%n' {} + > "$CANDIDATES_LIST"
   fi
 
-  if [[ -z "$ONSPD_CSV" || ! -f "$ONSPD_CSV" ]]; then
-    echo "[error] Could not locate the ONS Postcode Directory CSV inside the zip." >&2
-    echo "[error] Contents:" >&2
-    find "$TMP_DIR/ons" -type f -name '*.csv' >&2
+  if [[ ! -s "$CANDIDATES_LIST" ]]; then
+    echo "[error] No CSV files found inside ONS zip" >&2
     exit 1
   fi
 
-  echo "[info] Selected: $(basename "$ONSPD_CSV") ($(du -h "$ONSPD_CSV" | cut -f1))"
+  echo "[info] CSVs found in zip (size in bytes):"
+  sort -nr "$CANDIDATES_LIST" | awk -F'\t' '{ printf "       %12d  %s\n", $1, $2 }' >&2
+
+  ONSPD_CSV="$(sort -nr "$CANDIDATES_LIST" | head -n 1 | cut -f2)"
+
+  # Validate: the directory MUST have lat/long columns. Headers are case-
+  # variable across vintages, so match case-insensitively.
+  HEADER_LINE="$(head -n 1 "$ONSPD_CSV" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+  if ! echo "$HEADER_LINE" | grep -qE '(^|,)"?(lat|latitude)"?(,|$)' \
+     || ! echo "$HEADER_LINE" | grep -qE '(^|,)"?(long|longitude|lon|lng)"?(,|$)'; then
+    echo "[error] The largest CSV in the zip doesn't have lat/long columns." >&2
+    echo "[error] Selected: $ONSPD_CSV" >&2
+    echo "[error] Header  : $(head -n 1 "$ONSPD_CSV" | head -c 400)" >&2
+    echo "[error] This usually means ONS changed the zip layout. File an issue." >&2
+    exit 1
+  fi
+
+  echo "[info] Selected: $(basename "$ONSPD_CSV") ($(du -h "$ONSPD_CSV" | cut -f1)) — has lat/long ✓"
   cp "$ONSPD_CSV" "$ONS_FILE"
   echo "[ok] $ONS_FILE"
 fi
