@@ -56,9 +56,15 @@ else
   echo "[skip] data/council_tax_band_d_wales_2025_26.csv not found — skipping Wales council tax."
 fi
 
-# 6. Compute sector stats (must run last — depends on price_paid + postcodes + cpih)
+# 6. Compute sector stats (depends on price_paid + postcodes + cpih)
 run_step "Computing sector stats" \
   docker compose run --rm server sh -lc "node scripts/compute-sector-stats.js"
+
+# 7. Pre-warm TfL stop cache for London sectors (~30s, optional but recommended).
+#    Skipped automatically if TFL_APP_KEY isn't set. Without this, the first
+#    user to query each London sector pays a ~200ms /StopPoint latency.
+run_step "Pre-warming TfL stop cache (London)" \
+  docker compose run --rm server sh -lc "node scripts/prewarm-stops.js"
 
 echo ""
 echo "✅ All ingests complete."

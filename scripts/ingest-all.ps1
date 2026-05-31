@@ -46,9 +46,13 @@ if (Test-Path "data\council_tax_band_d_wales_2025_26.csv") {
     Write-Host "[skip] data\council_tax_band_d_wales_2025_26.csv not found — skipping Wales council tax." -ForegroundColor Yellow
 }
 
-# 6. Compute sector stats (must run last)
+# 6. Compute sector stats
 Run-Step "Computing sector stats" `
   'docker compose run --rm server sh -lc "node scripts/compute-sector-stats.js"'
+
+# 7. Pre-warm TfL stop cache for London sectors (~30s, optional but recommended)
+Run-Step "Pre-warming TfL stop cache (London)" `
+  'docker compose run --rm server sh -lc "node scripts/prewarm-stops.js"'
 
 Write-Host ""
 Write-Host "All ingests complete." -ForegroundColor Green

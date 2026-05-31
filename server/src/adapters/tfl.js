@@ -19,15 +19,45 @@ export function isWithinLondon(lat, lng) {
   );
 }
 
+// TfL PAYG fare estimates (2025) — used only when the Journey Planner API
+// doesn't return an actual `fare` object for the chosen journey. The API
+// omits fare data for many multi-modal journeys (e.g. Elizabeth Line + bus),
+// so we approximate based on the mode mix to avoid falling back to the
+// distance-based £/km estimate, which is dramatically wrong for tube/rail.
+const FARE_ESTIMATE_GBP = {
+  TUBE_OR_RAIL: 2.9,   // PAYG single, zone 1-2 typical
+  CROSS_ZONE_RAIL: 4.0, // longer rail/Elizabeth Line trips
+  BUS_ONLY: 1.75,      // bus single (Hopper free for 1 hour)
+  WALKING_ONLY: 0,
+};
+
+function estimateFareFromLegs(journey) {
+  const legs = Array.isArray(journey?.legs) ? journey.legs : [];
+  if (!legs.length) return null;
+  const modes = legs.map((l) => String(l?.mode?.name || "").toLowerCase());
+  const hasRail = modes.some((m) =>
+    ["tube", "dlr", "overground", "elizabeth-line", "national-rail", "tram"].includes(m)
+  );
+  const hasBus = modes.some((m) => m === "bus" || m === "coach");
+  const allWalking = modes.every((m) => m === "walking");
+  if (allWalking) return FARE_ESTIMATE_GBP.WALKING_ONLY;
+  if (hasRail) {
+    // Cross-zone heuristic: total journey duration > 35 min suggests longer trip
+    const minutes = Number(journey?.duration) || 0;
+    return minutes > 35 ? FARE_ESTIMATE_GBP.CROSS_ZONE_RAIL : FARE_ESTIMATE_GBP.TUBE_OR_RAIL;
+  }
+  if (hasBus) return FARE_ESTIMATE_GBP.BUS_ONLY;
+  return FARE_ESTIMATE_GBP.TUBE_OR_RAIL;
+}
+
 function pickFareGbp(journey) {
   const fare = journey?.fare;
-  if (!fare) return null;
 
-  if (Number.isFinite(fare.totalCost)) {
+  if (fare && Number.isFinite(fare.totalCost)) {
     return Number(fare.totalCost) / 100;
   }
 
-  if (Array.isArray(fare.fares) && fare.fares.length) {
+  if (fare && Array.isArray(fare.fares) && fare.fares.length) {
     const costs = [];
     fare.fares.forEach((item) => {
       if (Number.isFinite(item?.cost)) costs.push(Number(item.cost));
@@ -39,7 +69,10 @@ function pickFareGbp(journey) {
     }
   }
 
-  return null;
+  // No fare object in the response (common for multi-modal journeys involving
+  // Elizabeth Line, bus interchanges, etc.) — estimate from the mode mix so
+  // we don't silently fall through to the distance × £/km calc.
+  return estimateFareFromLegs(journey);
 }
 
 function sumLegDistanceKm(journey) {
@@ -52,6 +85,15 @@ function sumLegDistanceKm(journey) {
   return total > 0 ? total / 1000 : null;
 }
 
+// Build the path segment for /Journey/JourneyResults. TfL accepts either a
+// NaPTAN station ID (e.g. "940GZZLUOXC" for Oxford Circus) or a lat,lng pair.
+// Stop IDs unlock the fare engine; lat/lng routes correctly but often misses
+// the fare object. We prefer IDs whenever the caller has resolved one.
+function endpointFor(point) {
+  if (point?.naptan_id) return encodeURIComponent(point.naptan_id);
+  return `${point.lat},${point.lng}`;
+}
+
 export async function fetchTflJourney({ origin, destination }) {
   if (!TFL_APP_KEY && !TFL_APP_ID) {
     throw new Error("TFL_APP_KEY is not set");
@@ -60,8 +102,8 @@ export async function fetchTflJourney({ origin, destination }) {
     throw new Error("Origin and destination required for TfL journey");
   }
 
-  const from = `${origin.lat},${origin.lng}`;
-  const to = `${destination.lat},${destination.lng}`;
+  const from = endpointFor(origin);
+  const to = endpointFor(destination);
   const url = new URL(`${TFL_BASE_URL}/Journey/JourneyResults/${from}/to/${to}`);
   url.searchParams.set("journeyPreference", "LeastTime");
   // Modes must match TfL's accepted set exactly. Common gotchas:

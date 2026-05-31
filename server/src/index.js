@@ -334,11 +334,21 @@ app.get("/api/postcode/nearest-affordable", async (req, res) => {
 
     let row = affordability.workplacePostcode ? null : candidates[0];
     if (cappedAffordability.workplacePostcode) {
-      const commuteOrigins = candidates.map((candidate) => ({
-        origin_key: candidate.postcode_norm,
-        longitude: candidate.longitude,
-        latitude: candidate.latitude,
-      }));
+      const commuteOrigins = candidates.map((candidate) => {
+        // Derive postcode sector ("W1J 5" from "W1J 5HA"). Matches the
+        // canonical form used by compute-sector-stats so the sector_nearest_stop
+        // cache (prewarmed for London at setup) can hit here too.
+        const postcode = String(candidate.postcode || "").trim();
+        const match = postcode.match(/^(\S+)\s+(\S)/);
+        const sector = match ? `${match[1]} ${match[2]}` : null;
+        return {
+          origin_key: candidate.postcode_norm,
+          postcode_norm: candidate.postcode_norm,
+          sector,
+          longitude: candidate.longitude,
+          latitude: candidate.latitude,
+        };
+      });
       const commuteResult = await getCommuteForOrigins({
         origins: commuteOrigins,
         workplacePostcode: cappedAffordability.workplacePostcode,
