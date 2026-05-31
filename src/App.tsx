@@ -152,12 +152,15 @@ export default function App() {
   const [postcodeError, setPostcodeError] = useState<string | null>(null);
   const [postcodeLocation, setPostcodeLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [postcodeResults, setPostcodeResults] = useState<PricePaidPoint[]>([]);
-  const [priorityOrder, setPriorityOrder] = useState(["price", "commute", "schools", "crime"]);
-  const [filters, setFilters] = useState({
+  // Default ranking priorities and filter thresholds. UI controls for these
+  // were removed (schools/crime data isn't wired up yet), but the API still
+  // accepts both, so we keep the defaults and send them with every request.
+  const priorityOrder = ["price", "commute", "schools", "crime"];
+  const filters = {
     maxCommute: 60,
     minSchools: 60,
     maxCrime: 60,
-  });
+  };
   const [propertyType, setPropertyType] = useState("ALL");
   const [tenureFilter, setTenureFilter] = useState("ALL");
   const [affordability, setAffordability] = useState({
@@ -228,13 +231,6 @@ export default function App() {
   const lastZoomRef = useRef<number | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
   const requestIdRef = useRef(0);
-
-  const priorityOptions = [
-    { value: "price", label: "Price Paid (higher better)" },
-    { value: "commute", label: "Commute Time (lower better)" },
-    { value: "schools", label: "Schools (higher better)" },
-    { value: "crime", label: "Crime (lower better)" },
-  ];
 
   const propertyTypeLabels: Record<string, string> = {
     D: "Detached",
@@ -569,26 +565,6 @@ export default function App() {
         setPostcodeLocation(null);
         setPostcodeResults([]);
       });
-  };
-
-  const updatePriority = (index: number, value: string) => {
-    const next = [...priorityOrder];
-    next[index] = value;
-    const unique = Array.from(new Set(next));
-    while (unique.length < priorityOrder.length) {
-      const remaining = priorityOptions.map((opt) => opt.value).find((v) => !unique.includes(v));
-      if (!remaining) break;
-      unique.push(remaining);
-    }
-    setPriorityOrder(unique);
-  };
-
-  const movePriority = (from: number, to: number) => {
-    if (to < 0 || to >= priorityOrder.length) return;
-    const next = [...priorityOrder];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    setPriorityOrder(next);
   };
 
   const lastPayloadPreview = useMemo(() => {
@@ -1371,66 +1347,6 @@ export default function App() {
             )}
           </div>
 
-          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-slate-50 p-4 opacity-70">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Ranking Preferences</p>
-            <p className="mt-1 text-xs text-slate-500">Data not loaded yet.</p>
-            <div className="mt-3 space-y-2">
-              {priorityOrder.map((value, idx) => {
-                const label = priorityOptions.find((opt) => opt.value === value)?.label ?? value;
-                return (
-                  <div
-                    key={`priority-${value}`}
-                    className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-400"
-                  >
-                    <span className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] text-slate-400">
-                      ⋮⋮
-                    </span>
-                    <span className="font-semibold">
-                      #{idx + 1} · {label}
-                    </span>
-                    <span className="ml-auto text-[10px] text-slate-400">Weight {4 - idx}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-slate-50 p-4 opacity-70">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Filters</p>
-            <p className="mt-1 text-xs text-slate-500">Data not loaded yet.</p>
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="text-xs text-slate-600">
-                  Min Schools Score: <span className="font-semibold">{filters.minSchools}</span>
-                </label>
-                <input
-                  className="mt-2 w-full"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={filters.minSchools}
-                  disabled
-                  onChange={(e) => setFilters({ ...filters, minSchools: Number(e.target.value) })}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-600">
-                  Max Crime Index: <span className="font-semibold">{filters.maxCrime}</span>
-                </label>
-                <input
-                  className="mt-2 w-full"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={filters.maxCrime}
-                  disabled
-                  onChange={(e) => setFilters({ ...filters, maxCrime: Number(e.target.value) })}
-                />
-              </div>
-            </div>
-          </div>
         </aside>
 
         <main className="relative p-4 lg:h-screen lg:p-6">
