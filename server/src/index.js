@@ -661,6 +661,60 @@ app.get("/api/council-tax", async (req, res) => {
   }
 });
 
+// Lightweight commute lookup for a single origin → destination postcode pair.
+// Used by the property popup so the popup itself can render instantly with
+// price / mortgage / council tax, and the commute row fills in async without
+// blocking the user. The heavier /api/postcode/nearest-affordable still does
+// commute-aware property selection when called with workplacePostcode.
+app.get("/api/commute", async (req, res) => {
+  try {
+    const origin = String(req.query.origin || "").trim();
+    const dest = String(req.query.dest || "").trim();
+    const mode = String(req.query.mode || "DRIVING");
+    const daysPerWeek = Number(req.query.daysPerWeek ?? 5);
+    if (!origin || !dest) {
+      return res.status(400).json({ error: "origin and dest postcodes are required" });
+    }
+    const originLoc = await getPostcodeLocation(origin);
+    if (!originLoc) {
+      return res.status(404).json({ error: "origin postcode not found" });
+    }
+    // getPostcodeLocation returns only { postcode, latitude, longitude }, so
+    // we derive the normalised form and sector here. Sector lets the
+    // sector_nearest_stop cache hit (e.g. "W2 1RN" → "W2 1").
+    const postcodeNorm = String(originLoc.postcode || origin)
+      .replace(/\s+/g, "")
+      .toUpperCase();
+    const match = String(originLoc.postcode || "").trim().match(/^(\S+)\s+(\S)/);
+    const sector = match ? `${match[1]} ${match[2]}` : null;
+    const result = await getCommuteForOrigins({
+      origins: [
+        {
+          origin_key: postcodeNorm,
+          postcode_norm: postcodeNorm,
+          sector,
+          longitude: originLoc.longitude,
+          latitude: originLoc.latitude,
+        },
+      ],
+      workplacePostcode: dest,
+      mode,
+      daysPerWeek,
+    });
+    const entry = result.map.get(postcodeNorm);
+    res.json({
+      duration_sec: entry?.duration_sec ?? null,
+      distance_km: entry?.distance_km ?? null,
+      cost_monthly: entry?.cost_monthly ?? null,
+      mode: result.meta?.mode ?? mode,
+      destination: result.meta?.destination ?? null,
+      error: result.meta?.error ?? null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Commute lookup failed" });
+  }
+});
+
 app.post("/api/sector-rankings", rateLimit, async (req, res) => {
   try {
     const {

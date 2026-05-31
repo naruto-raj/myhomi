@@ -173,6 +173,32 @@ export function fetchCouncilTax(postcode: string) {
   }>(`/api/council-tax?${params.toString()}`);
 }
 
+/**
+ * Lightweight commute lookup for a single origin → destination postcode pair.
+ * Used by the property popup so the popup can render instantly with price /
+ * mortgage / council tax, then fill in the commute row async.
+ */
+export function fetchCommute(
+  origin: string,
+  dest: string,
+  mode: string = "PUBLIC",
+  daysPerWeek: number = 5
+) {
+  const params = new URLSearchParams({
+    origin,
+    dest,
+    mode,
+    daysPerWeek: String(daysPerWeek),
+  });
+  return json<{
+    duration_sec: number | null;
+    distance_km: number | null;
+    cost_monthly: number | null;
+    mode: string;
+    error?: string | null;
+  }>(`/api/commute?${params.toString()}`);
+}
+
 export function fetchPostcodeLatest(postcode: string) {
   const params = new URLSearchParams({ postcode });
   return json<{

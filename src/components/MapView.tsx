@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import type { AffordableHeatmapPoint, PricePaidPoint, SectorStat } from "../api/client";
-import { fetchCouncilTax, fetchNearestAffordablePostcode, fetchNearestPostcode } from "../api/client";
+import { fetchCommute, fetchCouncilTax, fetchNearestAffordablePostcode, fetchNearestPostcode } from "../api/client";
 
 type Props = {
   pricePaidPoints: PricePaidPoint[];
@@ -186,33 +186,20 @@ export default function MapView({
       const affordabilityValue = affordabilityRef.current;
       const propertyTypeValue = propertyTypeRef.current;
 
-      // Show an immediate loading popup at the click point so users see
-      // feedback while the (possibly slow) backend roundtrip is in flight.
-      // The slow case is the nearest-affordable + commute path: it can take
-      // 1–18 seconds on first London query (NaPTAN resolve + TfL Journey
-      // calls). Without this, the map appears unresponsive to the click.
+      // Two-stage popup:
+      // Stage 1 — fast — fetch the geographic-nearest affordable property
+      //           WITHOUT workplace, render the popup immediately with
+      //           everything we know (price, mortgage, council tax). The
+      //           commute row shows a spinner if a commute lookup is coming.
+      // Stage 2 — async — fire /api/commute separately. When it lands,
+      //           re-render the popup with real commute values + recompute
+      //           All-in monthly and Budget remaining. The popup is never
+      //           blocked by TfL latency.
       const willFetchCommute = Boolean(
         showBestFitRef.current &&
           affordabilityValue?.workplacePostcode &&
           String(affordabilityValue?.commuteMode || "").toUpperCase().startsWith("PUB")
       );
-      const loadingLabel = showBestFitRef.current
-        ? options?.label || "Nearest Affordable Sale"
-        : options?.label || "Nearest Sale";
-      const loadingHtml = `
-        <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; min-width: 220px;">
-          <div style="font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #94a3b8;">
-            ${loadingLabel}
-          </div>
-          <div style="margin-top: 12px; display: flex; align-items: center; gap: 10px; color: #475569; font-size: 13px;">
-            <span style="display:inline-block; width: 14px; height: 14px; border: 2px solid #cbd5e1; border-top-color: #10b981; border-radius: 50%; animation: ms-spin 0.8s linear infinite;"></span>
-            <span>${willFetchCommute ? "Fetching real TfL fare…" : "Finding nearest property…"}</span>
-          </div>
-          <style>@keyframes ms-spin { to { transform: rotate(360deg); } }</style>
-        </div>
-      `;
-      clickPopup.setHTML(loadingHtml);
-      clickPopup.setLngLat([lng, lat]).addTo(map);
 
       if (showBestFitRef.current && affordabilityValue) {
         try {
@@ -223,11 +210,12 @@ export default function MapView({
             propertyTypeValue,
             tenureFilter,
             {
-            workplacePostcode: affordabilityValue.workplacePostcode,
-            commuteMode: affordabilityValue.commuteMode,
-            commuteDaysPerWeek: affordabilityValue.commuteDaysPerWeek,
-            commuteCostSensitivity: affordabilityValue.commuteCostSensitivity,
-          }
+              // Intentionally omit workplacePostcode/commuteMode here. We
+              // want a fast geographic-nearest response — the heatmap has
+              // already filtered the area by affordability, so the popup
+              // doesn't need to re-pick the property using commute-adjusted
+              // budget. Commute is fetched separately for display only.
+            }
           );
           label = options?.label || "Nearest Affordable Sale";
         } catch {
@@ -238,11 +226,7 @@ export default function MapView({
         result = await fetchNearestPostcode(lat, lng);
       }
 
-      // Clear the loading popup if the fetch ultimately failed.
-      if (!result) {
-        clickPopup.remove();
-        return;
-      }
+      if (!result) return;
       const row = result.row;
       let councilTaxForPostcode = councilTaxMonthly;
       if (row?.postcode) {
@@ -298,20 +282,9 @@ export default function MapView({
       const latestYear = result.meta?.inflation_latest_year ?? null;
       const baseIndex = result.meta?.inflation_base_index ?? null;
       const latestIndex = result.meta?.inflation_latest_index ?? null;
-      const commute = result.meta?.commute ?? null;
-      const commuteMinutes = commute?.duration_sec ? Math.round(commute.duration_sec / 60) : null;
-      const commuteDistance = Number.isFinite(commute?.distance_km ?? NaN)
-        ? Number(commute?.distance_km).toFixed(1)
-        : null;
-      const commuteCost = commute?.cost_monthly ?? null;
       const mortgageMonthly = result.meta?.mortgage_monthly ?? null;
-      const totalMonthlyCost = result.meta?.total_monthly_cost ?? null;
-      const budgetRemaining = result.meta?.budget_remaining ?? null;
       const councilTax = Number.isFinite(councilTaxForPostcode) ? councilTaxForPostcode : 0;
-      const allInMonthly =
-        totalMonthlyCost !== null ? Math.round(totalMonthlyCost + councilTax) : null;
-      const budgetRemainingAllIn =
-        budgetRemaining !== null ? Math.round(budgetRemaining - councilTax) : null;
+      const monthlyBudget = Number(affordabilityValue?.monthlyBudget) || null;
       const propertyTypeCode = row?.property_type ?? null;
       const propertyTypeLabel =
         propertyTypeCode === "D"
@@ -348,63 +321,6 @@ export default function MapView({
           ? `CPIH 2015=100: ${baseYear} ${baseIndex} → ${latestYear} ${latestIndex}`
           : "CPIH data unavailable";
 
-      const commuteSourceTag =
-        commute?.mode === "PUBLIC"
-          ? `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #cbd5f5;background:#eef2ff;color:#4338ca;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;">TfL</span>`
-          : `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;">Route</span>`;
-
-      const commuteLine =
-        commuteMinutes !== null || commuteCost !== null || commuteDistance !== null || totalMonthlyCost !== null
-          ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
-              <span>Commute (est.) ${commuteSourceTag}</span>
-              <span style="color:#0f172a;font-weight:600;">
-                ${commuteMinutes !== null ? `${commuteMinutes} min` : "—"}
-                ${commuteDistance !== null ? ` · ${commuteDistance} km` : ""}
-                ${commuteCost !== null ? ` · £${Math.round(commuteCost).toLocaleString()}/mo` : ""}
-              </span>
-            </div>
-            ${
-              mortgageMonthly !== null
-                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>Mortgage / mo</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(mortgageMonthly).toLocaleString()}</span>
-                  </div>`
-                : ""
-            }
-            ${
-              councilTax > 0
-                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>Council tax (est. / mo)</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(councilTax).toLocaleString()}</span>
-                  </div>`
-                : ""
-            }
-            ${
-              allInMonthly !== null
-                ? `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                    <span>All-in monthly</span>
-                    <span style=\"color:#0f172a;font-weight:600;\">£${Math.round(allInMonthly).toLocaleString()}</span>
-                  </div>`
-                : ""
-            }
-            ${
-              budgetRemainingAllIn !== null
-                ? (() => {
-                    const isPositive = Number(budgetRemainingAllIn) >= 0;
-                    const arrow = isPositive ? "▲" : "▼";
-                    const color = isPositive ? "#16a34a" : "#dc2626";
-                    return `<div style=\"display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;\">
-                      <span>Budget remaining</span>
-                      <span style=\"color:${color};font-weight:700;display:inline-flex;align-items:center;gap:6px;\">
-                        ${arrow} £${Math.abs(Math.round(budgetRemainingAllIn)).toLocaleString()}
-                      </span>
-                    </div>`;
-                  })()
-                : ""
-            }
-            `
-          : "";
-
       const floorAreaLine = `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
           <span>Floor area (EPC)</span>
           <span style="color:#0f172a;font-weight:600;">
@@ -426,54 +342,243 @@ export default function MapView({
             </div>`
           : "";
 
-      const html = `
-        <div class="map-popup">
-          <div class="map-popup__card" style="max-width:280px;padding:12px;">
-            <button type="button" class="map-popup__close" aria-label="Close">×</button>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <div style="font-size:9px; letter-spacing:0.16em; text-transform:uppercase; color:#64748b;">${label}</div>
-              ${pctBadge}
-            </div>
-            <div style="margin-top:6px; font-size:16px; font-weight:700; color:#0f172a; font-family:var(--font-display, ui-serif, Georgia, serif);">
-              ${row?.postcode ?? "Nearest sale"}
-            </div>
-            <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px;">
-              <span style="padding:2px 8px; border-radius:999px; background:#fef3c7; font-size:10px; color:#92400e;">
-                ${propertyTypeLabel}
-              </span>
-            </div>
+      // Commute state for the popup. Stage 1 sets this to "loading" (if we
+      // expect a commute lookup) or "none"; stage 2 swaps in "ready" or "error".
+      type CommuteState =
+        | { status: "loading" }
+        | { status: "none" }
+        | { status: "error"; message?: string }
+        | {
+            status: "ready";
+            duration_sec: number | null;
+            distance_km: number | null;
+            cost_monthly: number | null;
+            mode: string;
+          };
 
-            <div style="margin-top:8px; padding:8px; border-radius:10px; background:#f8fafc; border:1px solid #e2e8f0;">
-              <div style="display:flex;justify-content:space-between;align-items:end;gap:8px;">
-                <span style="font-size:10px; color:#64748b;">Adj. ${latestYear ?? ""}</span>
-                ${inflationLine}
+      const renderHtml = (commuteState: CommuteState) => {
+        const isPublic =
+          commuteState.status === "ready" ? commuteState.mode === "PUBLIC" : willFetchCommute;
+
+        const sourceTag = isPublic
+          ? `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #cbd5f5;background:#eef2ff;color:#4338ca;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;">TfL</span>`
+          : `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;">Route</span>`;
+
+        // Right-hand value of the commute row + the cost number we use for
+        // total/budget recompute below.
+        let commuteValueHtml: string;
+        let commuteCostForTotals = 0;
+        switch (commuteState.status) {
+          case "loading":
+            commuteValueHtml = `<span style="display:inline-flex;align-items:center;gap:6px;color:#64748b;font-weight:500;">
+              <span class="ms-spin-12" style="display:inline-block;width:10px;height:10px;border:2px solid #cbd5e1;border-top-color:#10b981;border-radius:50%;animation:ms-spin 0.8s linear infinite;"></span>
+              <span style="font-size:11px;">fetching…</span>
+            </span>`;
+            break;
+          case "error":
+            commuteValueHtml = `<span style="color:#94a3b8;font-size:11px;">unavailable</span>`;
+            break;
+          case "ready": {
+            const mins =
+              commuteState.duration_sec != null
+                ? Math.round(commuteState.duration_sec / 60)
+                : null;
+            const km =
+              Number.isFinite(commuteState.distance_km ?? NaN)
+                ? Number(commuteState.distance_km).toFixed(1)
+                : null;
+            const cost = commuteState.cost_monthly;
+            commuteCostForTotals = Number.isFinite(cost ?? NaN) ? Number(cost) : 0;
+            commuteValueHtml = `
+              ${mins !== null ? `${mins} min` : "—"}
+              ${km !== null ? ` · ${km} km` : ""}
+              ${cost !== null ? ` · £${Math.round(cost).toLocaleString()}/mo` : ""}
+            `;
+            break;
+          }
+          case "none":
+          default:
+            commuteValueHtml = `<span style="color:#94a3b8;">—</span>`;
+            break;
+        }
+
+        const commuteLine =
+          commuteState.status === "none"
+            ? "" // No workplace / not public — skip the row entirely
+            : `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                <span>Commute (est.) ${sourceTag}</span>
+                <span style="color:#0f172a;font-weight:600;">${commuteValueHtml}</span>
+              </div>`;
+
+        const mortgageLine =
+          mortgageMonthly !== null
+            ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                <span>Mortgage / mo</span>
+                <span style="color:#0f172a;font-weight:600;">£${Math.round(mortgageMonthly).toLocaleString()}</span>
+              </div>`
+            : "";
+
+        const councilTaxLine =
+          councilTax > 0
+            ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                <span>Council tax (est. / mo)</span>
+                <span style="color:#0f172a;font-weight:600;">£${Math.round(councilTax).toLocaleString()}</span>
+              </div>`
+            : "";
+
+        // All-in monthly: mortgage + council tax + commute (if known, else 0).
+        const allInMonthly =
+          mortgageMonthly !== null
+            ? Math.round(mortgageMonthly + councilTax + commuteCostForTotals)
+            : null;
+        const allInLine =
+          allInMonthly !== null
+            ? `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                <span>All-in monthly</span>
+                <span style="color:#0f172a;font-weight:600;">£${allInMonthly.toLocaleString()}</span>
+              </div>`
+            : "";
+
+        const budgetRemainingAllIn =
+          monthlyBudget !== null && allInMonthly !== null
+            ? Math.round(monthlyBudget - allInMonthly)
+            : null;
+        const budgetLine =
+          budgetRemainingAllIn !== null
+            ? (() => {
+                const isPositive = budgetRemainingAllIn >= 0;
+                const arrow = isPositive ? "▲" : "▼";
+                const color = isPositive ? "#16a34a" : "#dc2626";
+                return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;">
+                  <span>Budget remaining</span>
+                  <span style="color:${color};font-weight:700;display:inline-flex;align-items:center;gap:6px;">
+                    ${arrow} £${Math.abs(budgetRemainingAllIn).toLocaleString()}
+                  </span>
+                </div>`;
+              })()
+            : "";
+
+        // Tiny "⟳ TfL" badge near the percent pill while we're fetching, so
+        // the user knows fares are arriving even before the row updates.
+        const topRightStatus =
+          commuteState.status === "loading"
+            ? `<span title="Fetching real TfL fare" style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;background:#eef2ff;color:#4338ca;font-size:9px;font-weight:600;">
+                <span style="display:inline-block;width:8px;height:8px;border:1.5px solid #c7d2fe;border-top-color:#4338ca;border-radius:50%;animation:ms-spin 0.8s linear infinite;"></span>
+                TfL
+              </span>`
+            : "";
+
+        return `
+          <div class="map-popup">
+            <div class="map-popup__card" style="max-width:280px;padding:12px;">
+              <button type="button" class="map-popup__close" aria-label="Close">×</button>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div style="font-size:9px; letter-spacing:0.16em; text-transform:uppercase; color:#64748b;">${label}</div>
+                <div style="display:inline-flex;align-items:center;gap:6px;">
+                  ${topRightStatus}
+                  ${pctBadge}
+                </div>
               </div>
-              <div style="margin-top:6px; display:flex;justify-content:space-between;align-items:end;gap:8px;">
-                <span style="font-size:10px; color:#64748b;">Last price</span>
-                <span style="font-size:13px; font-weight:600; color:#0f172a;">
-                  £${price ? Number(price).toLocaleString() : "—"}
+              <div style="margin-top:6px; font-size:16px; font-weight:700; color:#0f172a; font-family:var(--font-display, ui-serif, Georgia, serif);">
+                ${row?.postcode ?? "Nearest sale"}
+              </div>
+              <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px;">
+                <span style="padding:2px 8px; border-radius:999px; background:#fef3c7; font-size:10px; color:#92400e;">
+                  ${propertyTypeLabel}
                 </span>
               </div>
-              <div style="margin-top:2px; font-size:10px; color:#94a3b8;">
-                ${date}${year ? ` (${year})` : ""}
+
+              <div style="margin-top:8px; padding:8px; border-radius:10px; background:#f8fafc; border:1px solid #e2e8f0;">
+                <div style="display:flex;justify-content:space-between;align-items:end;gap:8px;">
+                  <span style="font-size:10px; color:#64748b;">Adj. ${latestYear ?? ""}</span>
+                  ${inflationLine}
+                </div>
+                <div style="margin-top:6px; display:flex;justify-content:space-between;align-items:end;gap:8px;">
+                  <span style="font-size:10px; color:#64748b;">Last price</span>
+                  <span style="font-size:13px; font-weight:600; color:#0f172a;">
+                    £${price ? Number(price).toLocaleString() : "—"}
+                  </span>
+                </div>
+                <div style="margin-top:2px; font-size:10px; color:#94a3b8;">
+                  ${date}${year ? ` (${year})` : ""}
+                </div>
+              </div>
+
+              <div style="margin-top:8px; display:grid; grid-template-columns:1fr; gap:4px;">
+                ${sectorLine}
+                ${floorAreaLine}
+                ${commuteLine}
+                ${mortgageLine}
+                ${councilTaxLine}
+                ${allInLine}
+                ${budgetLine}
+                <div style="font-size:9px; color:#94a3b8;">${inflationMeta}</div>
               </div>
             </div>
-
-            <div style="margin-top:8px; display:grid; grid-template-columns:1fr; gap:4px;">
-              ${sectorLine}
-              ${floorAreaLine}
-              ${commuteLine}
-              <div style="font-size:9px; color:#94a3b8;">${inflationMeta}</div>
-            </div>
+            <style>@keyframes ms-spin { to { transform: rotate(360deg); } }</style>
           </div>
-        </div>
-      `;
+        `;
+      };
 
-      clickPopup.setLngLat([targetLng, targetLat]).setHTML(html).addTo(map);
-      const popupEl = clickPopup.getElement();
-      const closeButton = popupEl.querySelector(".map-popup__close");
-      if (closeButton) {
-        closeButton.onclick = () => clickPopup.remove();
+      const wirePopup = () => {
+        const popupEl = clickPopup.getElement();
+        const closeButton = popupEl?.querySelector(".map-popup__close");
+        if (closeButton) {
+          (closeButton as HTMLElement).onclick = () => clickPopup.remove();
+        }
+      };
+
+      map.easeTo({
+        center: [targetLng, targetLat],
+        zoom: Math.max(map.getZoom(), 13),
+        speed: 1.2,
+        offset: [0, -140],
+      });
+
+      // Stage 1: render immediately with whatever we already know. Commute
+      // row shows a spinner if a public-transport workplace was set.
+      const initialState: CommuteState = willFetchCommute
+        ? { status: "loading" }
+        : { status: "none" };
+      clickPopup.setLngLat([targetLng, targetLat]).setHTML(renderHtml(initialState)).addTo(map);
+      wirePopup();
+
+      // Stage 2: async commute fetch. Re-render the popup when it lands.
+      // Track the popup identity via the close button DOM so a late response
+      // for a closed/replaced popup doesn't repaint the wrong thing.
+      if (willFetchCommute && row?.postcode && affordabilityValue?.workplacePostcode) {
+        const openWhileFetching = clickPopup;
+        fetchCommute(
+          row.postcode,
+          affordabilityValue.workplacePostcode,
+          affordabilityValue.commuteMode || "PUBLIC",
+          Number(affordabilityValue.commuteDaysPerWeek) || 5
+        )
+          .then((c) => {
+            if (openWhileFetching !== clickPopupRef.current) return; // popup replaced
+            if (!openWhileFetching.isOpen()) return; // user closed it
+            const hasData =
+              c.cost_monthly !== null ||
+              c.duration_sec !== null ||
+              c.distance_km !== null;
+            const next: CommuteState = hasData
+              ? {
+                  status: "ready",
+                  duration_sec: c.duration_sec,
+                  distance_km: c.distance_km,
+                  cost_monthly: c.cost_monthly,
+                  mode: c.mode,
+                }
+              : { status: "error", message: c.error || undefined };
+            openWhileFetching.setHTML(renderHtml(next));
+            wirePopup();
+          })
+          .catch(() => {
+            if (openWhileFetching !== clickPopupRef.current) return;
+            if (!openWhileFetching.isOpen()) return;
+            openWhileFetching.setHTML(renderHtml({ status: "error" }));
+            wirePopup();
+          });
       }
     },
     []
