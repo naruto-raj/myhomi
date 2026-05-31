@@ -66,6 +66,10 @@ export default function MapView({
   const propertyTypeRef = useRef<string | undefined>(propertyType);
   const onViewportChangeRef = useRef<Props["onViewportChange"]>(onViewportChange);
   const clickPopupRef = useRef<maplibregl.Popup | null>(null);
+  // Sectors data ref — the click handler (set up once in a useEffect) needs
+  // to read the latest sector list to find the nearest centroid when the
+  // user clicks off-data at high zoom.
+  const sectorsRef = useRef<Props["sectors"]>(sectors);
 
   const pricePoints = useMemo(
     () => ({
@@ -162,6 +166,10 @@ export default function MapView({
   useEffect(() => {
     propertyTypeRef.current = propertyType;
   }, [propertyType]);
+
+  useEffect(() => {
+    sectorsRef.current = sectors;
+  }, [sectors]);
 
   useEffect(() => {
     onViewportChangeRef.current = onViewportChange;
@@ -880,7 +888,64 @@ export default function MapView({
             ],
             { layers: interactiveLayers }
           );
-          if (features.length === 0) return;
+          if (features.length === 0) {
+            // Empty click. At high zoom (where centroids are how we navigate)
+            // this often means the user clicked on a building or street that
+            // happens to sit between sectors. Rather than doing nothing,
+            // find the nearest sector centroid, fly to it at a zoom where
+            // centroids are clearly visible, and open the popup for that
+            // sector's nearest affordable property.
+            //
+            // The threshold: only kick in at zoom ≥ 13. Below that the
+            // heatmap is the right navigation tool and an empty click is
+            // genuinely empty space.
+            const NAV_FROM_ZOOM = 13;
+            const NAV_TARGET_ZOOM = 13;
+            const NAV_MAX_KM = 15; // don't fly across the country
+            const currentZoom = map.getZoom();
+            if (currentZoom >= NAV_FROM_ZOOM && sectorsRef.current.length) {
+              const clickLng = event.lngLat.lng;
+              const clickLat = event.lngLat.lat;
+              let nearest: { longitude: number; latitude: number } | null = null;
+              let minSqDeg = Infinity;
+              for (const s of sectorsRef.current) {
+                const lng = Number(s.longitude);
+                const lat = Number(s.latitude);
+                if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+                // Squared distance in degrees — fine for finding the nearest,
+                // we'll convert to km only for the cap check below.
+                const dLng = lng - clickLng;
+                const dLat = lat - clickLat;
+                const sq = dLng * dLng + dLat * dLat;
+                if (sq < minSqDeg) {
+                  minSqDeg = sq;
+                  nearest = { longitude: lng, latitude: lat };
+                }
+              }
+              if (nearest) {
+                // 1° ≈ 111 km. Close enough at UK latitudes (~70km at 1° lng,
+                // ~111km at 1° lat — averaging gives a useful upper bound).
+                const approxKm = Math.sqrt(minSqDeg) * 111;
+                if (approxKm <= NAV_MAX_KM) {
+                  const target = nearest;
+                  map.flyTo({
+                    center: [target.longitude, target.latitude],
+                    zoom: Math.min(currentZoom, NAV_TARGET_ZOOM),
+                    speed: 1.4,
+                  });
+                  // Open the popup once the flyTo settles. moveend fires once
+                  // the camera is in place; remove the listener immediately
+                  // after to avoid re-firing on every subsequent pan.
+                  const onSettled = () => {
+                    map.off("moveend", onSettled);
+                    showNearestAt(target.longitude, target.latitude).catch(() => {});
+                  };
+                  map.on("moveend", onSettled);
+                }
+              }
+            }
+            return;
+          }
         }
 
         showNearestAt(event.lngLat.lng, event.lngLat.lat).catch(() => {});
