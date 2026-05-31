@@ -395,11 +395,17 @@ export default function MapView({
               Number.isFinite(commuteState.distance_km ?? NaN)
                 ? Number(commuteState.distance_km).toFixed(1)
                 : null;
+            // TfL's Journey Planner only computes leg.distance for walking
+            // legs (tube/rail/bus legs return 0), so summed distance for a
+            // PUBLIC journey is the *walking portion* of the trip. Label it
+            // so users don't read it as the total journey distance. For
+            // non-PUBLIC routes the distance is real road km from ORS.
+            const kmLabel = commuteState.mode === "PUBLIC" ? "km walk" : "km";
             const cost = commuteState.cost_monthly;
             commuteCostForTotals = Number.isFinite(cost ?? NaN) ? Number(cost) : 0;
             commuteValueHtml = `
               ${mins !== null ? `${mins} min` : "—"}
-              ${km !== null ? ` · ${km} km` : ""}
+              ${km !== null ? ` · ${km} ${kmLabel}` : ""}
               ${cost !== null ? ` · £${Math.round(cost).toLocaleString()}/mo` : ""}
             `;
             break;
