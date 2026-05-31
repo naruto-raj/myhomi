@@ -13,9 +13,21 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square">
 </p>
 
-<!-- TODO: Add a screenshot or short demo gif here. Suggested size: 1280×720.
-     Place file at docs/screenshot.png and update the path below. -->
-<!-- <img src="docs/screenshot.png" alt="Housing Map screenshot" width="800"> -->
+<!--
+  Hero image — used by GitHub's social preview and pulled into LinkedIn
+  / Slack / Twitter link previews when this repo is shared.
+-->
+<a href="docs/demo.mp4">
+  <img src="docs/screenshot.png" alt="Housing Map — UK affordability explorer with real TfL fares" width="820">
+</a>
+
+<!--
+  Inline demo — GitHub renders <video> tags directly in the README.
+  Click-through fallback above keeps LinkedIn / non-video clients sensible.
+-->
+<video src="docs/demo.mp4" width="820" controls muted autoplay loop playsinline></video>
+
+<p><em>30-second demo: budget input → heatmap → real TfL fare lookup → affordability ranking.</em></p>
 
 </div>
 
