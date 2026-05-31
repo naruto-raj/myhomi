@@ -873,13 +873,14 @@ export default function MapView({
           interactiveLayers.push("sector-points");
         }
         if (interactiveLayers.length) {
-          // Query a generous box around the click, not a single pixel. Users
-          // shouldn't have to land exactly on a heatmap blob or centroid
-          // dot — "near enough" should count. 28 px ≈ a fingertip on touch
-          // and a comfortable mouse tolerance on desktop. It's still small
-          // relative to the rendered heatmap radius (48–140 px depending on
-          // zoom), so the gate still kills clicks in genuinely empty space.
-          const TOLERANCE_PX = 28;
+          // Query a generous box around the click, not a single pixel. The
+          // size of the halo depends on what's being shown:
+          //   • zoom < 13 → heatmap-dominant view, blobs are 48–140 px wide,
+          //     so a 28 px halo is comfortable without feeling magnetic.
+          //   • zoom ≥ 13 → discrete centroid circles (4–16 px each), so a
+          //     tighter 14 px halo keeps the click feeling precise — you're
+          //     clicking on or near a specific dot, not anywhere in a blob.
+          const TOLERANCE_PX = map.getZoom() >= 13 ? 14 : 28;
           const { x, y } = event.point;
           const features = map.queryRenderedFeatures(
             [
