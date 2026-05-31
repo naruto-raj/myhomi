@@ -185,6 +185,35 @@ export default function MapView({
       let label = options?.label || "Nearest Sale";
       const affordabilityValue = affordabilityRef.current;
       const propertyTypeValue = propertyTypeRef.current;
+
+      // Show an immediate loading popup at the click point so users see
+      // feedback while the (possibly slow) backend roundtrip is in flight.
+      // The slow case is the nearest-affordable + commute path: it can take
+      // 1–18 seconds on first London query (NaPTAN resolve + TfL Journey
+      // calls). Without this, the map appears unresponsive to the click.
+      const willFetchCommute = Boolean(
+        showBestFitRef.current &&
+          affordabilityValue?.workplacePostcode &&
+          String(affordabilityValue?.commuteMode || "").toUpperCase().startsWith("PUB")
+      );
+      const loadingLabel = showBestFitRef.current
+        ? options?.label || "Nearest Affordable Sale"
+        : options?.label || "Nearest Sale";
+      const loadingHtml = `
+        <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; min-width: 220px;">
+          <div style="font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #94a3b8;">
+            ${loadingLabel}
+          </div>
+          <div style="margin-top: 12px; display: flex; align-items: center; gap: 10px; color: #475569; font-size: 13px;">
+            <span style="display:inline-block; width: 14px; height: 14px; border: 2px solid #cbd5e1; border-top-color: #10b981; border-radius: 50%; animation: ms-spin 0.8s linear infinite;"></span>
+            <span>${willFetchCommute ? "Fetching real TfL fare…" : "Finding nearest property…"}</span>
+          </div>
+          <style>@keyframes ms-spin { to { transform: rotate(360deg); } }</style>
+        </div>
+      `;
+      clickPopup.setHTML(loadingHtml);
+      clickPopup.setLngLat([lng, lat]).addTo(map);
+
       if (showBestFitRef.current && affordabilityValue) {
         try {
           result = await fetchNearestAffordablePostcode(
@@ -209,7 +238,11 @@ export default function MapView({
         result = await fetchNearestPostcode(lat, lng);
       }
 
-      if (!result) return;
+      // Clear the loading popup if the fetch ultimately failed.
+      if (!result) {
+        clickPopup.remove();
+        return;
+      }
       const row = result.row;
       let councilTaxForPostcode = councilTaxMonthly;
       if (row?.postcode) {
