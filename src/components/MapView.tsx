@@ -669,7 +669,14 @@ export default function MapView({
             1.7,
             12,
             2.2,
+            14,
+            2.6,
+            16,
+            3.0,
           ],
+          // Radius keeps growing past zoom 12 so individual points stay
+          // covered at street view. Without this the heatmap collapses into
+          // a few tiny dots and the page looks empty even where data exists.
           "heatmap-radius": [
             "interpolate",
             ["linear"],
@@ -680,8 +687,28 @@ export default function MapView({
             34,
             12,
             48,
+            14,
+            80,
+            16,
+            140,
           ],
-          "heatmap-opacity": 0.9,
+          // Fade out at high zoom so the discrete sector-point circles
+          // (which fade IN at the same range) become the primary visual.
+          "heatmap-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5,
+            0.9,
+            12,
+            0.9,
+            13,
+            0.7,
+            14,
+            0.45,
+            15,
+            0.25,
+          ],
           "heatmap-color": [
             "interpolate",
             ["linear"],
@@ -732,9 +759,35 @@ export default function MapView({
             1,
             "#facc15",
           ],
-          "circle-opacity": 0.75,
+          // Auto-fade IN past zoom 12 so discrete sector circles take over
+          // from the heatmap at street view. Invisible (alpha=0) below zoom
+          // 11 so the heatmap owns the country/city visualization. The
+          // visibility effect below still hides the layer entirely at low
+          // zoom unless the manual "Show centroids" toggle overrides.
+          "circle-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            10,
+            0,
+            12,
+            0.6,
+            14,
+            0.85,
+          ],
           "circle-stroke-color": "#0f172a",
           "circle-stroke-width": 1,
+          "circle-stroke-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            10,
+            0,
+            12,
+            0.6,
+            14,
+            0.9,
+          ],
         },
       });
 
@@ -790,6 +843,34 @@ export default function MapView({
       map.on("click", async (event) => {
         if (!event.lngLat) return;
         if (dragged) return;
+
+        // When the affordability heatmap or sector circles are visible, only
+        // show a popup if the click actually landed on rendered features —
+        // not on an arbitrary point in space that happens to be miles from
+        // the nearest data. queryRenderedFeatures returns the source features
+        // contributing to the pixel under the cursor, which for a heatmap
+        // means "within the rendered radius of any data point." Empty result
+        // = the user clicked on an area with no affordable property nearby.
+        const interactiveLayers: string[] = [];
+        if (
+          map.getLayer("best-fit-heat") &&
+          map.getLayoutProperty("best-fit-heat", "visibility") !== "none"
+        ) {
+          interactiveLayers.push("best-fit-heat");
+        }
+        if (
+          map.getLayer("sector-points") &&
+          map.getLayoutProperty("sector-points", "visibility") !== "none"
+        ) {
+          interactiveLayers.push("sector-points");
+        }
+        if (interactiveLayers.length) {
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: interactiveLayers,
+          });
+          if (features.length === 0) return;
+        }
+
         showNearestAt(event.lngLat.lng, event.lngLat.lat).catch(() => {});
       });
 
@@ -836,12 +917,29 @@ export default function MapView({
     if (map.getLayer("price-paid-heat")) {
       map.setLayoutProperty("price-paid-heat", "visibility", showHeatmap ? "visible" : "none");
     }
-    if (map.getLayer("sector-points")) {
-      map.setLayoutProperty("sector-points", "visibility", showCentroids ? "visible" : "none");
-    }
     if (map.getLayer("best-fit-heat")) {
       map.setLayoutProperty("best-fit-heat", "visibility", showBestFit ? "visible" : "none");
     }
+
+    // Sector centroids: visible at all zooms when the manual toggle is on,
+    // and ALWAYS visible at zoom ≥ 12 regardless of the toggle. The reason:
+    // the heatmap fades out past zoom 12, so without the centroids the map
+    // would look empty at street view even when affordable properties exist.
+    const SECTOR_AUTO_ZOOM = 12;
+    const updateSectorVisibility = () => {
+      if (!map.getLayer("sector-points")) return;
+      const shouldShow = showCentroids || map.getZoom() >= SECTOR_AUTO_ZOOM;
+      map.setLayoutProperty(
+        "sector-points",
+        "visibility",
+        shouldShow ? "visible" : "none"
+      );
+    };
+    updateSectorVisibility();
+    map.on("zoomend", updateSectorVisibility);
+    return () => {
+      map.off("zoomend", updateSectorVisibility);
+    };
   }, [showHeatmap, showCentroids, showBestFit]);
 
   useEffect(() => {
