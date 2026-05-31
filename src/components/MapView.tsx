@@ -889,21 +889,18 @@ export default function MapView({
             { layers: interactiveLayers }
           );
           if (features.length === 0) {
-            // Empty click. At high zoom (where centroids are how we navigate)
-            // this often means the user clicked on a building or street that
-            // happens to sit between sectors. Rather than doing nothing,
-            // find the nearest sector centroid, fly to it at a zoom where
-            // centroids are clearly visible, and open the popup for that
-            // sector's nearest affordable property.
+            // Empty click. At any zoom, navigate to the nearest sector
+            // centroid and open the popup there. The user clicked because
+            // they want to see data — even if they missed every rendered
+            // feature, we should be helpful and bring them to the closest
+            // useful spot rather than doing nothing.
             //
-            // The threshold: only kick in at zoom ≥ 13. Below that the
-            // heatmap is the right navigation tool and an empty click is
-            // genuinely empty space.
-            const NAV_FROM_ZOOM = 13;
-            const NAV_TARGET_ZOOM = 13;
-            const NAV_MAX_KM = 15; // don't fly across the country
+            // Zoom is preserved (we just pan). Cap distance generously so
+            // a stray click somewhere with no data nearby doesn't fling
+            // the camera across the country.
+            const NAV_MAX_KM = 50;
             const currentZoom = map.getZoom();
-            if (currentZoom >= NAV_FROM_ZOOM && sectorsRef.current.length) {
+            if (sectorsRef.current.length) {
               const clickLng = event.lngLat.lng;
               const clickLat = event.lngLat.lat;
               let nearest: { longitude: number; latitude: number } | null = null;
@@ -930,7 +927,7 @@ export default function MapView({
                   const target = nearest;
                   map.flyTo({
                     center: [target.longitude, target.latitude],
-                    zoom: Math.min(currentZoom, NAV_TARGET_ZOOM),
+                    zoom: currentZoom, // preserve the user's current zoom
                     speed: 1.4,
                   });
                   // Open the popup once the flyTo settles. moveend fires once
