@@ -194,14 +194,6 @@ export default function App() {
   const [showBestFit, setShowBestFit] = useState(true);
   const [selectedSector, setSelectedSector] = useState<SectorStat | null>(null);
   const [bestFitSort, setBestFitSort] = useState("score");
-  const [offerChecklist, setOfferChecklist] = useState<Record<string, boolean>>({
-    aip: false,
-    funds: false,
-    solicitor: false,
-    id: false,
-    notes: false,
-  });
-  const [showOfferTimeline, setShowOfferTimeline] = useState(false);
   const [rateStressDelta, setRateStressDelta] = useState(2);
   const [compsAnchor, setCompsAnchor] = useState<{
     latitude: number;
@@ -1169,14 +1161,6 @@ export default function App() {
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Coverage Mode</p>
-              <p className="mt-2 text-xs text-slate-500">
-                {currentZoom !== null && currentZoom >= zoomThreshold
-                  ? "Local view (zoomed): viewport sectors."
-                  : "Nationwide view: precomputed sector stats."}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Map Layers</p>
               <div className="mt-3 space-y-2 text-xs text-slate-700">
                 <label className="flex items-center gap-2">
@@ -1387,54 +1371,6 @@ export default function App() {
             </div>
           </div>
 
-          <div className="lg:absolute lg:right-6 lg:top-6">
-            <button
-              type="button"
-              className="rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700"
-              onClick={() => setShowOfferTimeline((prev) => !prev)}
-            >
-              {showOfferTimeline ? "Hide offer readiness" : "Show offer readiness"}
-            </button>
-          </div>
-          {showOfferTimeline && (
-            <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/95 p-4 text-sm shadow-sm lg:absolute lg:right-6 lg:top-16 lg:mt-0 lg:w-72">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Offer timeline</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">Offer readiness</p>
-              <div className="mt-3 space-y-3 text-xs text-slate-700">
-                {[
-                  { key: "aip", label: "Mortgage in Principle / AIP" },
-                  { key: "funds", label: "Proof of funds" },
-                  { key: "solicitor", label: "Solicitor instructed" },
-                  { key: "id", label: "ID + address verification" },
-                  { key: "notes", label: "Offer notes ready (timelines, fixtures)" },
-                ].map((item, index) => {
-                  const checked = offerChecklist[item.key as keyof typeof offerChecklist];
-                  return (
-                    <div key={item.key} className="relative flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            checked ? "bg-emerald-500" : "bg-slate-300"
-                          }`}
-                        />
-                        {index < 4 && <span className="mt-1 h-full w-px bg-slate-200" />}
-                      </div>
-                      <label className="flex flex-1 items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) =>
-                            setOfferChecklist({ ...offerChecklist, [item.key]: e.target.checked })
-                          }
-                        />
-                        <span>{item.label}</span>
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </main>
       </div>
     </div>
