@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🏠 Housing Map
+# 🏠 myhomi
 
 ### Find where you can actually afford to live in the UK
 
@@ -18,7 +18,7 @@
   / Slack / Twitter link previews when this repo is shared.
 -->
 <a href="docs/demo.mp4">
-  <img src="docs/screenshot.png" alt="Housing Map — UK affordability explorer with real TfL fares" width="820">
+  <img src="docs/screenshot.png" alt="myhomi — UK affordability explorer with real TfL fares" width="820">
 </a>
 
 <!--

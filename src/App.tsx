@@ -615,7 +615,7 @@ export default function App() {
       <div className="grid min-h-screen grid-cols-1 gap-0 lg:h-screen lg:grid-cols-[420px_1fr] lg:overflow-hidden">
         <aside className="border-b border-slate-200/60 bg-white/75 p-6 shadow-[0_10px_30px_-25px_rgba(15,23,42,0.5)] backdrop-blur lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <div className="mb-8">
-            <h1 className="font-display text-3xl font-semibold text-slate-900">myfirsthomie</h1>
+            <h1 className="font-display text-3xl font-semibold text-slate-900">myhomi</h1>
             <p className="mt-2 text-sm text-slate-600">
               Discover affordable pockets with CPIH‑adjusted prices, then explore the latest sales on a live map.
             </p>
