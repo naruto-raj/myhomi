@@ -43,6 +43,17 @@ services:
       EPC_API_EMAIL: ${EPC_API_EMAIL}
       EPC_API_KEY: ${EPC_API_KEY}
       EPC_CACHE_TTL_DAYS: ${EPC_CACHE_TTL_DAYS:-30}
+      # Commute (OpenRouteService). These MUST be forwarded here, not relied on
+      # via server/.env + dotenv — adapters/commute.js captures env vars at
+      # module-load time, before dotenv.config() runs, so a value only present
+      # in /app/.env arrives too late and the adapter sends requests without
+      # an Authorization header.
+      ORS_API_KEY: ${ORS_API_KEY}
+      COMMUTE_COST_PER_KM: ${COMMUTE_COST_PER_KM:-0.35}
+      COMMUTE_DAYS_PER_WEEK: ${COMMUTE_DAYS_PER_WEEK:-5}
+      COMMUTE_CACHE_TTL_DAYS: ${COMMUTE_CACHE_TTL_DAYS:-30}
+      COMMUTE_MAX_ORIGINS: ${COMMUTE_MAX_ORIGINS:-120}
+      COMMUTE_BATCH_SIZE: ${COMMUTE_BATCH_SIZE:-50}
     ports:
       - "5050:5050"
     volumes:
